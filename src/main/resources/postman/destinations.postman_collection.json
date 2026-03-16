@@ -1,0 +1,309 @@
+{
+  "info": {
+    "name": "Spring Best Practices - Destinations API",
+    "description": "Sample requests for the POST /api/destinations endpoint.\n\nThe collection pre-request script auto-generates a fresh signed JWT before every request using the development secret from application.yaml, so tokens never expire mid-session. Switch the base_url variable to target other environments.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "jwt_token",
+      "value": "",
+      "type": "string",
+      "description": "Populated automatically by the collection pre-request script."
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Generates a fresh HS256 JWT signed with the dev secret from application.yaml.",
+          "// Runs before every request so the 5-minute expiry never causes a mid-session 401.",
+          "",
+          "const secretB64 = 'dGhpcy1pcy1hLXZlcnktbG9uZy1zZWNyZXQta2V5LWZvci1qd3Qtc2lnbmluZw==';",
+          "",
+          "function base64url(str) {",
+          "    return btoa(unescape(encodeURIComponent(str)))",
+          "        .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');",
+          "}",
+          "",
+          "const header  = base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));",
+          "const now     = Math.floor(Date.now() / 1000);",
+          "const payload = base64url(JSON.stringify({ sub: 'postman-user', iat: now, exp: now + 300 }));",
+          "",
+          "const signingInput = header + '.' + payload;",
+          "const key           = CryptoJS.enc.Base64.parse(secretB64);",
+          "const hash          = CryptoJS.HmacSHA256(signingInput, key);",
+          "const signature     = hash.toString(CryptoJS.enc.Base64)",
+          "    .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');",
+          "",
+          "pm.collectionVariables.set('jwt_token', signingInput + '.' + signature);"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Destinations",
+      "item": [
+        {
+          "name": "Add destination - valid (201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"France\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"]
+            },
+            "description": "Happy path. Expects 201 with the saved destination in the response body."
+          }
+        },
+        {
+          "name": "Add destination - same day trip (201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"Germany\",\n  \"cityName\": \"Berlin\",\n  \"dateFrom\": \"2025-09-15\",\n  \"dateTo\": \"2025-09-15\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"]
+            },
+            "description": "dateFrom and dateTo are the same date. Same-day trips are valid and should return 201."
+          }
+        },
+        {
+          "name": "Add destination - no token (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"Italy\",\n  \"cityName\": \"Rome\",\n  \"dateFrom\": \"2025-07-01\",\n  \"dateTo\": \"2025-07-14\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"]
+            },
+            "description": "Authorization header is intentionally omitted. Expects 401."
+          }
+        },
+        {
+          "name": "Add destination - invalid token signature (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdHRhY2tlciJ9.invalidsignature" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"Italy\",\n  \"cityName\": \"Rome\",\n  \"dateFrom\": \"2025-07-01\",\n  \"dateTo\": \"2025-07-14\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"]
+            },
+            "description": "Token has a tampered signature. Expects 401."
+          }
+        },
+        {
+          "name": "Add destination - blank country (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"]
+            },
+            "description": "countryName is blank. Expects 400 with countryName listed in fieldErrors."
+          }
+        },
+        {
+          "name": "Add destination - XSS payload in country (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"<script>alert('xss')</script>\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"]
+            },
+            "description": "countryName contains a script tag. The @Pattern constraint blocks anything outside [a-zA-Z '-]. Expects 400."
+          }
+        },
+        {
+          "name": "Add destination - country name too long (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"]
+            },
+            "description": "countryName is 101 characters, one over the @Size(max=100) limit. Expects 400."
+          }
+        },
+        {
+          "name": "Add destination - missing dates (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"France\",\n  \"cityName\": \"Paris\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"]
+            },
+            "description": "dateFrom and dateTo are absent. Expects 400 with both fields listed in fieldErrors."
+          }
+        },
+        {
+          "name": "Add destination - unrecognised country (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"Narnia\",\n  \"cityName\": \"Castle\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"]
+            },
+            "description": "Passes Bean Validation (valid characters) but fails ISO 3166-1 lookup. Expects 422 with appErrorCode 415."
+          }
+        },
+        {
+          "name": "Add destination - city name too short (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"France\",\n  \"cityName\": \"A\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"]
+            },
+            "description": "Single-character city passes @Pattern but fails the length >= 2 check in LocationValidationService. Expects 422 with appErrorCode 416."
+          }
+        },
+        {
+          "name": "Add destination - dateFrom after dateTo (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"France\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2025-06-10\",\n  \"dateTo\": \"2025-06-01\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"]
+            },
+            "description": "dateFrom is later than dateTo. Expects 422 with appErrorCode 417."
+          }
+        },
+        {
+          "name": "Add destination - duplicate (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"France\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"]
+            },
+            "description": "Send this after 'Add destination - valid (201)' to hit the duplicate check. The country/city composite key already exists. Expects 409 with appErrorCode 418."
+          }
+        }
+      ]
+    }
+  ]
+}
