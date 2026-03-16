@@ -7,6 +7,7 @@ import learn.spring_best_practices.dto.response.DestinationResponse;
 import learn.spring_best_practices.exception.AppErrorCode;
 import learn.spring_best_practices.exception.AppException;
 import learn.spring_best_practices.service.DestinationService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
@@ -22,11 +23,10 @@ import javax.crypto.SecretKey;
 import java.time.LocalDate;
 import java.util.Date;
 
-import org.junit.jupiter.api.BeforeEach;
-
 import static org.mockito.ArgumentMatchers.any;
-import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -65,7 +65,9 @@ class DestinationControllerTest {
     private static final String SECRET =
             "dGhpcy1pcy1hLXZlcnktbG9uZy1zZWNyZXQta2V5LWZvci1qd3Qtc2lnbmluZw==";
 
-    private static final String URL = "/api/destinations";
+    private static final String ADD_URL    = "/api/destinations/add";
+    private static final String VERIFY_URL = "/api/destinations/verify";
+    private static final String DELETE_URL = "/api/destinations";
 
     private String bearerToken() {
         SecretKey key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(SECRET));
@@ -96,7 +98,7 @@ class DestinationControllerTest {
             }
             """;
 
-    // ── 201 Created ───────────────────────────────────────────────────────
+    // ── addDestination: 201 Created ───────────────────────────────────────
 
     @Test
     void addDestination_validRequest_returns201WithBody() throws Exception {
@@ -106,7 +108,7 @@ class DestinationControllerTest {
                 .build();
         when(destinationService.addDestination(any())).thenReturn(stub);
 
-        mockMvc.perform(post(URL)
+        mockMvc.perform(post(ADD_URL)
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(VALID_BODY))
@@ -125,7 +127,7 @@ class DestinationControllerTest {
                 .build();
         when(destinationService.addDestination(any())).thenReturn(stub);
 
-        mockMvc.perform(post(URL)
+        mockMvc.perform(post(ADD_URL)
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(SAME_DAY_BODY))
@@ -134,7 +136,7 @@ class DestinationControllerTest {
                 .andExpect(jsonPath("$.dateTo").value("2026-06-01"));
     }
 
-    // ── 400 Validation ────────────────────────────────────────────────────
+    // ── addDestination: 400 Validation ────────────────────────────────────
 
     @Test
     void addDestination_blankCountry_returns400() throws Exception {
@@ -142,7 +144,7 @@ class DestinationControllerTest {
                 {"countryName":"","cityName":"London","dateFrom":"2026-06-01","dateTo":"2026-12-01"}
                 """;
 
-        mockMvc.perform(post(URL)
+        mockMvc.perform(post(ADD_URL)
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
@@ -158,7 +160,7 @@ class DestinationControllerTest {
                  "dateFrom":"2026-06-01","dateTo":"2026-12-01"}
                 """;
 
-        mockMvc.perform(post(URL)
+        mockMvc.perform(post(ADD_URL)
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
@@ -172,7 +174,7 @@ class DestinationControllerTest {
                 {"countryName":"United Kingdom","cityName":"London"}
                 """;
 
-        mockMvc.perform(post(URL)
+        mockMvc.perform(post(ADD_URL)
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
@@ -180,24 +182,24 @@ class DestinationControllerTest {
                 .andExpect(jsonPath("$.appErrorCode").value(AppErrorCode.VALIDATION_FAILED.getAppCode()));
     }
 
-    // ── 401 Unauthenticated ───────────────────────────────────────────────
+    // ── addDestination: 401 Unauthenticated ───────────────────────────────
 
     @Test
     void addDestination_noToken_returns401() throws Exception {
-        mockMvc.perform(post(URL)
+        mockMvc.perform(post(ADD_URL)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(VALID_BODY))
                 .andExpect(status().isUnauthorized());
     }
 
-    // ── 409 Conflict ──────────────────────────────────────────────────────
+    // ── addDestination: 409 Conflict ──────────────────────────────────────
 
     @Test
     void addDestination_duplicate_returns409WithAppCode418() throws Exception {
         when(destinationService.addDestination(any()))
                 .thenThrow(new AppException(AppErrorCode.DUPLICATE_DESTINATION));
 
-        mockMvc.perform(post(URL)
+        mockMvc.perform(post(ADD_URL)
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(VALID_BODY))
@@ -205,14 +207,14 @@ class DestinationControllerTest {
                 .andExpect(jsonPath("$.appErrorCode").value(418));
     }
 
-    // ── 422 Domain errors ─────────────────────────────────────────────────
+    // ── addDestination: 422 Domain errors ─────────────────────────────────
 
     @Test
     void addDestination_invalidCountry_returns422WithAppCode415() throws Exception {
         when(destinationService.addDestination(any()))
                 .thenThrow(new AppException(AppErrorCode.INVALID_COUNTRY));
 
-        mockMvc.perform(post(URL)
+        mockMvc.perform(post(ADD_URL)
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(VALID_BODY))
@@ -226,7 +228,7 @@ class DestinationControllerTest {
         when(destinationService.addDestination(any()))
                 .thenThrow(new AppException(AppErrorCode.INVALID_CITY));
 
-        mockMvc.perform(post(URL)
+        mockMvc.perform(post(ADD_URL)
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(VALID_BODY))
@@ -239,11 +241,146 @@ class DestinationControllerTest {
         when(destinationService.addDestination(any()))
                 .thenThrow(new AppException(AppErrorCode.INVALID_DATE_RANGE));
 
-        mockMvc.perform(post(URL)
+        mockMvc.perform(post(ADD_URL)
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(VALID_BODY))
                 .andExpect(status().is(422))
                 .andExpect(jsonPath("$.appErrorCode").value(417));
+    }
+
+    // ── verifyDestination: 200 OK ─────────────────────────────────────────
+
+    @Test
+    void verifyDestination_validRequest_returns200WithBody() throws Exception {
+        DestinationResponse stub = DestinationResponse.builder()
+                .countryName("United Kingdom").cityName("London")
+                .dateFrom(LocalDate.of(2026, 6, 1)).dateTo(LocalDate.of(2026, 12, 1))
+                .build();
+        when(destinationService.verifyDestination(any())).thenReturn(stub);
+
+        mockMvc.perform(post(VERIFY_URL)
+                        .header("Authorization", bearerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.countryName").value("United Kingdom"))
+                .andExpect(jsonPath("$.cityName").value("London"));
+    }
+
+    // ── verifyDestination: 400 Validation ─────────────────────────────────
+
+    @Test
+    void verifyDestination_blankCity_returns400() throws Exception {
+        String body = """
+                {"countryName":"United Kingdom","cityName":"","dateFrom":"2026-06-01","dateTo":"2026-12-01"}
+                """;
+
+        mockMvc.perform(post(VERIFY_URL)
+                        .header("Authorization", bearerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.appErrorCode").value(AppErrorCode.VALIDATION_FAILED.getAppCode()));
+    }
+
+    @Test
+    void verifyDestination_injectionInCityName_returns400() throws Exception {
+        String body = """
+                {"countryName":"United Kingdom","cityName":"<img src=x onerror=alert(1)>",
+                 "dateFrom":"2026-06-01","dateTo":"2026-12-01"}
+                """;
+
+        mockMvc.perform(post(VERIFY_URL)
+                        .header("Authorization", bearerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.appErrorCode").value(AppErrorCode.VALIDATION_FAILED.getAppCode()));
+    }
+
+    // ── verifyDestination: 401 Unauthenticated ────────────────────────────
+
+    @Test
+    void verifyDestination_noToken_returns401() throws Exception {
+        mockMvc.perform(post(VERIFY_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ── verifyDestination: 422 Domain errors ──────────────────────────────
+
+    @Test
+    void verifyDestination_invalidCountry_returns422() throws Exception {
+        when(destinationService.verifyDestination(any()))
+                .thenThrow(new AppException(AppErrorCode.INVALID_COUNTRY));
+
+        mockMvc.perform(post(VERIFY_URL)
+                        .header("Authorization", bearerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().is(422))
+                .andExpect(jsonPath("$.appErrorCode").value(415));
+    }
+
+    @Test
+    void verifyDestination_invalidCity_returns422() throws Exception {
+        when(destinationService.verifyDestination(any()))
+                .thenThrow(new AppException(AppErrorCode.INVALID_CITY));
+
+        mockMvc.perform(post(VERIFY_URL)
+                        .header("Authorization", bearerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().is(422))
+                .andExpect(jsonPath("$.appErrorCode").value(416));
+    }
+
+    // ── removeDestination: 200 OK ─────────────────────────────────────────
+
+    @Test
+    void removeDestination_found_returns200WithBody() throws Exception {
+        DestinationResponse stub = DestinationResponse.builder()
+                .countryName("United Kingdom").cityName("London")
+                .dateFrom(LocalDate.of(2026, 6, 1)).dateTo(LocalDate.of(2026, 12, 1))
+                .build();
+        when(destinationService.removeDestination(any())).thenReturn(stub);
+
+        mockMvc.perform(delete(DELETE_URL + "/United Kingdom/London")
+                        .header("Authorization", bearerToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.countryName").value("United Kingdom"))
+                .andExpect(jsonPath("$.cityName").value("London"));
+    }
+
+    // ── removeDestination: 400 Path variable injection ────────────────────
+
+    @Test
+    void removeDestination_injectionInPath_returns400() throws Exception {
+        mockMvc.perform(delete(DELETE_URL + "/<script>alert(1)<script>/London")
+                        .header("Authorization", bearerToken()))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ── removeDestination: 401 Unauthenticated ────────────────────────────
+
+    @Test
+    void removeDestination_noToken_returns401() throws Exception {
+        mockMvc.perform(delete(DELETE_URL + "/United Kingdom/London"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ── removeDestination: 404 Not Found ──────────────────────────────────
+
+    @Test
+    void removeDestination_notFound_returns404() throws Exception {
+        when(destinationService.removeDestination(any()))
+                .thenThrow(new AppException(AppErrorCode.DESTINATION_NOT_FOUND));
+
+        mockMvc.perform(delete(DELETE_URL + "/United Kingdom/London")
+                        .header("Authorization", bearerToken()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.appErrorCode").value(419));
     }
 }

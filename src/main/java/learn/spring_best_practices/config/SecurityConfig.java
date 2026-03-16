@@ -32,6 +32,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // H2 console permitted for local development — disable in production
                         .requestMatchers("/h2-console/**").permitAll()
+                        // Health endpoint is unauthenticated — consumed by infra probes
+                        .requestMatchers("/actuator/health/**").permitAll()
                         // All other requests must carry a valid JWT
                         .anyRequest().authenticated()
                 )

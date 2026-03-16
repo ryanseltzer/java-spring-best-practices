@@ -57,4 +57,33 @@ public class DestinationServiceImpl implements DestinationService {
                 .dateTo(saved.getDateTo())
                 .build();
     }
+
+    @Override
+    @Transactional
+    public DestinationResponse removeDestination(DestinationId id) {
+        Destination deleteDestination = destinationRepository.findById(id).orElseThrow(() -> new AppException(AppErrorCode.DESTINATION_NOT_FOUND));
+        locationValidationService.validateLocation(id.getCountryName(), id.getCityName());
+        
+        destinationRepository.delete(deleteDestination);
+        return DestinationResponse.builder()
+                .countryName(deleteDestination.getId().getCountryName())
+                .cityName(deleteDestination.getId().getCityName())
+                .dateFrom(deleteDestination.getDateFrom())
+                .dateTo(deleteDestination.getDateTo())
+                .build();
+
+    }
+
+    @Override
+    public DestinationResponse verifyDestination(DestinationRequest request) {
+        // Validate country and city against ISO 3166-1 data
+        locationValidationService.validateLocation(request.getCountryName(), request.getCityName());
+
+        return DestinationResponse.builder()
+                .countryName(request.getCountryName())
+                .cityName(request.getCityName())
+                .dateFrom(request.getDateFrom())
+                .dateTo(request.getDateTo())
+                .build();
+    }   
 }

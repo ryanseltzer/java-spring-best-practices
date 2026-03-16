@@ -25,6 +25,9 @@ public enum AppErrorCode {
     // ── Resource conflicts (HTTP 409 Conflict) ────────────────────
     DUPLICATE_DESTINATION   (418, 409, "A destination for that country and city already exists"),
 
+    // ── Not found (HTTP 404) ──────────────────────────────────────
+    DESTINATION_NOT_FOUND   (419, 404, "No destination found for the given country and city"),
+
     // ── Server errors ─────────────────────────────────────────────
     INTERNAL_ERROR          (500, 500, "An internal server error occurred");
 
