@@ -39,6 +39,9 @@ out/
 ### Application config (contains secrets) ###
 src/main/resources/application.yaml
 
+### Claude Code ###
+.claude/
+
 ### Test & coverage reports (generated under build/) ###
 build/reports/
 build/test-results/
