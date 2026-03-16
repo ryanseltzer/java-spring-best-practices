@@ -1,6 +1,7 @@
 package learn.spring_best_practices.service.impl;
 
 import learn.spring_best_practices.dto.request.DestinationRequest;
+import learn.spring_best_practices.dto.request.RemoveDestinationRequest;
 import learn.spring_best_practices.dto.response.DestinationResponse;
 import learn.spring_best_practices.entity.Destination;
 import learn.spring_best_practices.entity.DestinationId;
@@ -50,28 +51,17 @@ public class DestinationServiceImpl implements DestinationService {
         log.info("Destination added [country={}, city={}]",
                 saved.getId().getCountryName(), saved.getId().getCityName());
 
-        return DestinationResponse.builder()
-                .countryName(saved.getId().getCountryName())
-                .cityName(saved.getId().getCityName())
-                .dateFrom(saved.getDateFrom())
-                .dateTo(saved.getDateTo())
-                .build();
+        return DestinationResponse.from(saved);
     }
 
     @Override
     @Transactional
-    public DestinationResponse removeDestination(DestinationId id) {
-        Destination deleteDestination = destinationRepository.findById(id).orElseThrow(() -> new AppException(AppErrorCode.DESTINATION_NOT_FOUND));
-        locationValidationService.validateLocation(id.getCountryName(), id.getCityName());
-        
-        destinationRepository.delete(deleteDestination);
-        return DestinationResponse.builder()
-                .countryName(deleteDestination.getId().getCountryName())
-                .cityName(deleteDestination.getId().getCityName())
-                .dateFrom(deleteDestination.getDateFrom())
-                .dateTo(deleteDestination.getDateTo())
-                .build();
-
+    public DestinationResponse removeDestination(RemoveDestinationRequest request) {
+        DestinationId id = new DestinationId(request.countryName(), request.cityName());
+        Destination destination = destinationRepository.findById(id)
+                .orElseThrow(() -> new AppException(AppErrorCode.DESTINATION_NOT_FOUND));
+        destinationRepository.delete(destination);
+        return DestinationResponse.from(destination);
     }
 
     @Override
@@ -85,5 +75,5 @@ public class DestinationServiceImpl implements DestinationService {
                 .dateFrom(request.getDateFrom())
                 .dateTo(request.getDateTo())
                 .build();
-    }   
+    }
 }

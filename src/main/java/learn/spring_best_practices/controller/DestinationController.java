@@ -4,8 +4,8 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import learn.spring_best_practices.dto.request.DestinationRequest;
+import learn.spring_best_practices.dto.request.RemoveDestinationRequest;
 import learn.spring_best_practices.dto.response.DestinationResponse;
-import learn.spring_best_practices.entity.DestinationId;
 import learn.spring_best_practices.service.DestinationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -49,8 +49,8 @@ public class DestinationController {
             @PathVariable @Size(max = 100) @Pattern(regexp = "^[a-zA-Z '\\-]+$") String countryName,
             @PathVariable @Size(max = 100) @Pattern(regexp = "^[a-zA-Z '\\-]+$") String cityName) {
         log.debug("removeDestination called by authenticated principal");
-        DestinationResponse response = destinationService.removeDestination(new DestinationId(countryName, cityName));
-        return ResponseEntity.status(HttpStatus.OK).body(response);
+        RemoveDestinationRequest request = new RemoveDestinationRequest(countryName, cityName);
+        return ResponseEntity.ok(destinationService.removeDestination(request));
     }
 
     @PostMapping("/verify")

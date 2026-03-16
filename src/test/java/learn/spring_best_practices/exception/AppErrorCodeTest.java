@@ -51,6 +51,11 @@ class AppErrorCodeTest {
         assertThat(AppErrorCode.DUPLICATE_DESTINATION.getHttpStatusCode()).isEqualTo(409);
     }
 
+    @Test void destinationNotFound_hasExpectedValues() {
+        assertThat(AppErrorCode.DESTINATION_NOT_FOUND.getAppCode()).isEqualTo(419);
+        assertThat(AppErrorCode.DESTINATION_NOT_FOUND.getHttpStatusCode()).isEqualTo(404);
+    }
+
     @Test void internalError_hasExpectedValues() {
         assertThat(AppErrorCode.INTERNAL_ERROR.getAppCode()).isEqualTo(500);
         assertThat(AppErrorCode.INTERNAL_ERROR.getHttpStatusCode()).isEqualTo(500);
