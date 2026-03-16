@@ -20,7 +20,7 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthFilter;
 
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http) {
         http
                 // A01/A07: CSRF disabled — stateless REST API authenticated via JWT (no session cookies)
                 .csrf(csrf -> csrf.disable())
@@ -30,9 +30,9 @@ public class SecurityConfig {
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
                 .authorizeHttpRequests(auth -> auth
-                        // H2 console permitted for local development — disable in production
-                        .requestMatchers("/h2-console/**").permitAll()
-                        // All other requests must carry a valid JWT
+                        // All requests must carry a valid JWT.
+                        // H2 console and /actuator/health/** are permitted only under the dev
+                        // profile via DevSecurityConfig — they are fully blocked here.
                         .anyRequest().authenticated()
                 )
 
@@ -46,8 +46,6 @@ public class SecurityConfig {
 
                 // A05: Harden HTTP response headers
                 .headers(headers -> headers
-                        // Allow same-origin frames so the H2 console iframe works
-                        .frameOptions(frame -> frame.sameOrigin())
                         // A05: Prevent MIME-type sniffing
                         .contentTypeOptions(Customizer.withDefaults())
                         // A02: Enforce HTTPS for future requests
@@ -55,6 +53,9 @@ public class SecurityConfig {
                                 .includeSubDomains(true)
                                 .maxAgeInSeconds(31536000)
                         )
+                        // Default frame policy is DENY — protects against clickjacking.
+                        // Dev profile overrides this to sameOrigin for the H2 console iframe.
+                        .frameOptions(Customizer.withDefaults())
                 );
 
         return http.build();

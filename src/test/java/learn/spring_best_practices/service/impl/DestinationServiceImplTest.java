@@ -1,6 +1,7 @@
 package learn.spring_best_practices.service.impl;
 
 import learn.spring_best_practices.dto.request.DestinationRequest;
+import learn.spring_best_practices.dto.request.RemoveDestinationRequest;
 import learn.spring_best_practices.dto.response.DestinationResponse;
 import learn.spring_best_practices.entity.Destination;
 import learn.spring_best_practices.entity.DestinationId;
@@ -8,6 +9,7 @@ import learn.spring_best_practices.exception.AppErrorCode;
 import learn.spring_best_practices.exception.AppException;
 import learn.spring_best_practices.repository.DestinationRepository;
 import learn.spring_best_practices.service.LocationValidationService;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -126,6 +128,71 @@ class DestinationServiceImplTest {
 
         assertThat(response.countryName()).isEqualTo("United Kingdom");
         assertThat(response.cityName()).isEqualTo("London");
+    }
+
+    // ── removeDestination ─────────────────────────────────────────────────
+
+    @Test
+    void removeDestination_found_deletesAndReturnsResponse() {
+        RemoveDestinationRequest request = new RemoveDestinationRequest("United Kingdom", "London");
+        DestinationId id = new DestinationId("United Kingdom", "London");
+        Destination existing = new Destination(id, DATE_FROM, DATE_TO);
+
+        when(destinationRepository.findById(id)).thenReturn(Optional.of(existing));
+
+        DestinationResponse response = service.removeDestination(request);
+
+        assertThat(response.countryName()).isEqualTo("United Kingdom");
+        assertThat(response.cityName()).isEqualTo("London");
+        assertThat(response.dateFrom()).isEqualTo(DATE_FROM);
+        assertThat(response.dateTo()).isEqualTo(DATE_TO);
+
+        verify(destinationRepository).delete(existing);
+    }
+
+    @Test
+    void removeDestination_notFound_throwsDestinationNotFound() {
+        RemoveDestinationRequest request = new RemoveDestinationRequest("United Kingdom", "London");
+        DestinationId id = new DestinationId("United Kingdom", "London");
+        when(destinationRepository.findById(id)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.removeDestination(request))
+                .isInstanceOf(AppException.class)
+                .satisfies(e -> assertThat(((AppException) e).getErrorCode())
+                        .isEqualTo(AppErrorCode.DESTINATION_NOT_FOUND));
+
+        verify(destinationRepository, never()).delete(any());
+    }
+
+    // ── verifyDestination ─────────────────────────────────────────────────
+
+    @Test
+    void verifyDestination_validRequest_returnsResponse() {
+        DestinationRequest req = validRequest();
+
+        DestinationResponse response = service.verifyDestination(req);
+
+        assertThat(response.countryName()).isEqualTo("United Kingdom");
+        assertThat(response.cityName()).isEqualTo("London");
+        assertThat(response.dateFrom()).isEqualTo(DATE_FROM);
+        assertThat(response.dateTo()).isEqualTo(DATE_TO);
+
+        verify(locationValidationService).validateLocation("United Kingdom", "London");
+        verifyNoInteractions(destinationRepository);
+    }
+
+    @Test
+    void verifyDestination_locationValidationFails_propagatesException() {
+        DestinationRequest req = buildRequest("Narnia", "Castle", DATE_FROM, DATE_TO);
+        doThrow(new AppException(AppErrorCode.INVALID_COUNTRY))
+                .when(locationValidationService).validateLocation(any(), any());
+
+        assertThatThrownBy(() -> service.verifyDestination(req))
+                .isInstanceOf(AppException.class)
+                .satisfies(e -> assertThat(((AppException) e).getErrorCode())
+                        .isEqualTo(AppErrorCode.INVALID_COUNTRY));
+
+        verifyNoInteractions(destinationRepository);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────

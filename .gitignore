@@ -45,3 +45,5 @@ src/main/resources/application.yaml
 ### Test & coverage reports (generated under build/) ###
 build/reports/
 build/test-results/
+.sonarlint/connectedMode.json
+.gitignore

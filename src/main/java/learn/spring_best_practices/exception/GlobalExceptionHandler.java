@@ -1,5 +1,6 @@
 package learn.spring_best_practices.exception;
 
+import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
@@ -30,6 +31,18 @@ public class GlobalExceptionHandler {
             List<String> fieldErrors,
             Instant timestamp
     ) {}
+
+    /** Path/query variable constraint violations — maps to {@link AppErrorCode#VALIDATION_FAILED} (400). */
+    @ExceptionHandler(ConstraintViolationException.class)
+    ResponseEntity<ErrorResponse> handleConstraintViolation(ConstraintViolationException ex) {
+        AppErrorCode code = AppErrorCode.VALIDATION_FAILED;
+        List<String> fieldErrors = ex.getConstraintViolations().stream()
+                .map(cv -> cv.getPropertyPath() + ": " + cv.getMessage())
+                .toList();
+        return ResponseEntity.badRequest()
+                .body(new ErrorResponse(code.getAppCode(), code.getHttpStatusCode(),
+                        code.getMessage(), fieldErrors, Instant.now()));
+    }
 
     /** Bean Validation failures — maps to {@link AppErrorCode#VALIDATION_FAILED} (400). */
     @ExceptionHandler(MethodArgumentNotValidException.class)

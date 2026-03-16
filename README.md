@@ -1,9 +1,9 @@
 # Spring Best Practices
 
 A Spring Boot REST API demonstrating practical application of the OWASP Top 10 mitigations,
-structured exception handling, Bean Validation, and JWT-based stateless authentication. The
-domain is intentionally simple — storing travel destinations — so the focus stays on the
-plumbing rather than business complexity.
+structured exception handling, Bean Validation, JWT-based stateless authentication, AOP-based
+observability, and Spring Boot Actuator health monitoring. The domain is intentionally simple
+— storing travel destinations — so the focus stays on the plumbing rather than business complexity.
 
 ---
 
@@ -12,9 +12,12 @@ plumbing rather than business complexity.
 - Java 25, Spring Boot 4.1.0-SNAPSHOT
 - Spring Security 6 (stateless JWT filter chain)
 - Spring Data JPA with H2 in-memory database
+- Spring Boot Actuator (custom health indicator)
+- AspectJ (`aspectjweaver`) for AOP execution logging
 - jjwt 0.12.6 for JWT parsing and signature verification
 - Lombok, Bean Validation (Jakarta)
 - JUnit 5, Mockito, AssertJ, MockMvc
+- JaCoCo 0.8.13 for test coverage reporting
 
 ---
 
@@ -41,15 +44,16 @@ for local development only — it must be disabled before any deployment.
 
 ## Endpoints
 
-### POST /api/destinations
+All endpoints require a valid signed JWT in the `Authorization: Bearer <token>` header.
 
-Adds a new travel destination. All requests must include a valid signed JWT in the
-`Authorization` header.
+### POST /api/destinations/add
+
+Adds a new travel destination.
 
 **Request**
 
 ```
-POST /api/destinations
+POST /api/destinations/add
 Authorization: Bearer <token>
 Content-Type: application/json
 
@@ -74,12 +78,65 @@ Content-Type: application/json
 
 ---
 
+### DELETE /api/destinations/{countryName}/{cityName}
+
+Removes an existing destination by its composite key. The path variables are validated with the
+same `@Pattern` and `@Size` constraints as the request body fields.
+
+**Request**
+
+```
+DELETE /api/destinations/France/Paris
+Authorization: Bearer <token>
+```
+
+**Responses**
+
+| Status | Meaning |
+|--------|---------|
+| 200 OK | Destination deleted; response body mirrors the deleted fields |
+| 400 Bad Request | Path variable failed the pattern or size constraint |
+| 401 Unauthorized | JWT is missing, expired, or has an invalid signature |
+| 404 Not Found | No destination exists for that country/city combination |
+
+---
+
+### POST /api/destinations/verify
+
+Validates that a country and city are recognised without persisting anything. Useful for
+pre-flight checks before adding a destination.
+
+**Request**
+
+```
+POST /api/destinations/verify
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "countryName": "France",
+  "cityName": "Paris",
+  "dateFrom": "2025-06-01",
+  "dateTo": "2025-06-10"
+}
+```
+
+**Responses**
+
+| Status | Meaning |
+|--------|---------|
+| 200 OK | Country and city are valid; response body mirrors the request fields |
+| 400 Bad Request | Bean Validation failed; `fieldErrors` array lists each violation |
+| 401 Unauthorized | JWT is missing, expired, or has an invalid signature |
+| 422 Unprocessable Content | Country not recognised or city name too short |
+
+---
+
 ## Security and best practices
 
 ### A01 — Broken Access Control
-Every route except the H2 console requires a valid JWT. The service layer performs an explicit
-duplicate check before inserting, rather than relying solely on the database constraint to catch
-it.
+Every route requires a valid JWT. The service layer performs an explicit duplicate check before
+inserting, rather than relying solely on the database constraint to catch it.
 
 ### A02 — Cryptographic Failures
 JWTs are signed with HMAC-SHA256. Token validity is checked in two places: jjwt's own parser
@@ -90,8 +147,10 @@ five minutes.
 ### A03 — Injection
 Both `countryName` and `cityName` are restricted to the pattern `^[a-zA-Z '\-]+$` via `@Pattern`
 before the method body executes, which rules out SQL metacharacters, script tags, and any other
-injection payloads at the DTO layer. Spring Data JPA uses parameterised queries throughout, so
-there is no string-concatenated SQL anywhere in the codebase.
+injection payloads. This constraint is applied at both the DTO layer (`@RequestBody`) and
+directly on the path variable parameters of the DELETE endpoint via `@Validated` on the
+controller class. Spring Data JPA uses parameterised queries throughout, so there is no
+string-concatenated SQL anywhere in the codebase.
 
 ### A04 — Insecure Design
 Date range validation, location validation, and duplicate detection all run as separate,
@@ -121,11 +180,45 @@ at WARN level with the remote address. Unhandled exceptions are logged at ERROR 
 full stack trace server-side, but the response body contains only a generic message — no stack
 trace, exception class, or internal detail is ever returned to the caller.
 
+`ServiceExecutionAspect` adds cross-cutting execution timing and outcome logging across the
+entire service layer via AOP. Successful calls are logged at DEBUG level with elapsed time;
+exceptions are logged at WARN level with the exception type and elapsed time. This keeps
+timing and error observability out of the business logic itself.
+
+---
+
+## AOP
+
+`ServiceExecutionAspect` is an `@Around` aspect that intercepts every method in the
+`learn.spring_best_practices.service` package and its sub-packages. For each call it records:
+
+- the short method signature
+- whether the call completed normally or threw
+- elapsed time in milliseconds
+
+Successful calls emit a DEBUG log; thrown exceptions emit a WARN log and then re-throw the
+original exception unchanged, so the aspect is transparent to callers.
+
+---
+
+## Actuator health
+
+`DestinationServiceHealthIndicator` implements `HealthIndicator` and is exposed at:
+
+```
+GET /actuator/health/destinationService
+```
+
+The indicator performs a live `repository.count()` query on each call so it reflects real
+database availability rather than just whether the bean wired correctly. The current destination
+count is included in the `details` map when the status is `UP`. If the query throws, the
+indicator returns `DOWN` with the exception attached.
+
 ---
 
 ## Test suite
 
-The suite has 106 tests across 11 classes. Unit tests use plain JUnit 5 with Mockito where
+The suite has 129 tests across 12 classes. Unit tests use plain JUnit 5 with Mockito where
 dependencies need to be isolated. Integration tests load the full Spring context against a real
 H2 database with transactional rollback, so there is no shared state between runs. Controller
 tests use real signed JWTs rather than `@WithMockUser` so that the JWT filter chain is exercised
@@ -149,12 +242,16 @@ null, and oversized values for both `countryName` and `cityName`, parameterised 
 invalid characters (digits, `@`, `!`, `<script>`), parameterised tests for valid multi-word
 country names, and null values for both date fields.
 
-### DestinationServiceImplTest (6 tests)
+### DestinationServiceImplTest (10 tests)
 Unit tests the service layer with mocked repository and location validator. Covers: `dateFrom`
 after `dateTo` throws `INVALID_DATE_RANGE` before touching any other dependency; same-day trip
 is accepted; location validation failure propagates the correct error code; duplicate ID throws
 `DUPLICATE_DESTINATION` without calling save; a valid request saves and maps the response
-correctly; leading/trailing whitespace is trimmed before the entity is persisted.
+correctly; leading/trailing whitespace is trimmed before the entity is persisted;
+`removeDestination` finds and deletes the entity and returns the deleted fields;
+`removeDestination` throws `DESTINATION_NOT_FOUND` when the ID is absent;
+`verifyDestination` returns the validated fields without writing to the repository;
+`verifyDestination` propagates a location validation failure.
 
 ### LocationValidationServiceImplTest (12 tests)
 Tests the country/city validator in isolation. Covers known countries passing, whitespace-padded
@@ -169,26 +266,42 @@ it exists; `findById` returns empty when it does not; `existsById` returns true 
 `existsById` returns false when absent; `findAll` returns all saved rows; `deleteById` removes
 the record.
 
-### DestinationControllerTest (10 tests)
+### DestinationControllerTest (20 tests)
 Full-stack MockMvc tests with the real Spring Security filter chain applied via
 `springSecurity()`. Tokens are generated with the same secret as `application.yaml` so the JWT
-filter is properly exercised. Covers: valid request returns 201 with the correct JSON body;
-same-day trip returns 201; blank country returns 400 with `fieldErrors`; XSS payload in country
-returns 400; missing dates return 400; no token returns 401; duplicate throws 409 with app code
-418; unrecognised country returns 422 with app code 415; invalid city returns 422 with app code
-416; reversed date range returns 422 with app code 417.
+filter is properly exercised. Covers all three endpoints:
 
-### GlobalExceptionHandlerTest (9 tests)
+- **addDestination** (10): valid 201, same-day 201, blank country 400, XSS in country 400,
+  missing dates 400, no token 401, duplicate 409, invalid country 422, invalid city 422,
+  reversed date range 422.
+- **verifyDestination** (6): valid 200, blank city 400, XSS in city 400, no token 401,
+  invalid country 422, invalid city 422.
+- **removeDestination** (4): found 200, injection in path variable 400, no token 401,
+  not found 404.
+
+### GlobalExceptionHandlerTest (10 tests)
 Unit tests the exception handler directly. Covers: a single validation field error produces
 a 400 with the field name and message in the array; multiple field errors are all returned;
-a parameterised test runs `handleAppException` for every `AppErrorCode` enum value, asserting
-that the HTTP status, app code, and message all match the enum definition; the generic catch-all
-handler returns 500 with a generic message and does not echo the original exception message back
-to the caller.
+a parameterised test runs `handleAppException` for every `AppErrorCode` enum value (7 values),
+asserting that the HTTP status, app code, and message all match the enum definition; the generic
+catch-all handler returns 500 with a generic message and does not echo the original exception
+message back to the caller.
 
-### AppErrorCodeTest and AppExceptionTest (30 tests)
-Verify that every error code enum entry has the expected app code, HTTP status, and message,
-and that `AppException` correctly stores and exposes the error code it was constructed with.
+### AppErrorCodeTest and AppExceptionTest (35 tests)
+Three parametrised tests cover every error code enum entry (7 values), verifying that each has
+a positive app code, a valid HTTP status, and a non-blank message. Seven additional named tests
+assert the exact app code and HTTP status for each specific enum constant. `AppExceptionTest`
+verifies that `AppException` correctly stores and exposes the error code it was constructed with.
+
+### ServiceExecutionAspectTest (2 tests)
+Unit tests the AOP aspect in isolation using a mocked `ProceedingJoinPoint`. Covers: a
+successful method call returns the result from `proceed()`; a throwing method call re-throws
+the original exception unchanged.
+
+### DestinationServiceHealthIndicatorTest (2 tests)
+Unit tests the Actuator health indicator with a mocked repository. Covers: when the repository
+is reachable the indicator returns `UP` with the live destination count in the details map;
+when the repository throws the indicator returns `DOWN`.
 
 ---
 
@@ -197,19 +310,48 @@ and that `AppException` correctly stores and exposes the error code it was const
 Run date: 16 March 2026
 
 ```
-BUILD SUCCESSFUL in 20s
+BUILD SUCCESSFUL in 19s
 
-learn.spring_best_practices.ApplicationTests                     1 / 1 passed
-learn.spring_best_practices.controller.DestinationControllerTest    10 / 10 passed
-learn.spring_best_practices.dto.DestinationRequestValidationTest    19 / 19 passed
-learn.spring_best_practices.exception.AppErrorCodeTest              24 / 24 passed
-learn.spring_best_practices.exception.AppExceptionTest               6 / 6 passed
-learn.spring_best_practices.exception.GlobalExceptionHandlerTest     9 / 9 passed
-learn.spring_best_practices.repository.DestinationRepositoryTest     7 / 7 passed
-learn.spring_best_practices.security.JwtAuthenticationFilterTest     6 / 6 passed
-learn.spring_best_practices.security.JwtUtilTest                     6 / 6 passed
-learn.spring_best_practices.service.impl.DestinationServiceImplTest  6 / 6 passed
-learn.spring_best_practices.service.impl.LocationValidationServiceImplTest  12 / 12 passed
+learn.spring_best_practices.aop.ServiceExecutionAspectTest                     2 / 2 passed
+learn.spring_best_practices.controller.DestinationControllerTest              20 / 20 passed
+learn.spring_best_practices.dto.DestinationRequestValidationTest              19 / 19 passed
+learn.spring_best_practices.exception.AppErrorCodeTest                        28 / 28 passed
+learn.spring_best_practices.exception.AppExceptionTest                         7 / 7 passed
+learn.spring_best_practices.exception.GlobalExceptionHandlerTest              10 / 10 passed
+learn.spring_best_practices.health.DestinationServiceHealthIndicatorTest       2 / 2 passed
+learn.spring_best_practices.repository.DestinationRepositoryTest               7 / 7 passed
+learn.spring_best_practices.security.JwtAuthenticationFilterTest               6 / 6 passed
+learn.spring_best_practices.security.JwtUtilTest                               6 / 6 passed
+learn.spring_best_practices.service.impl.DestinationServiceImplTest           10 / 10 passed
+learn.spring_best_practices.service.impl.LocationValidationServiceImplTest    12 / 12 passed
 
-Total: 106 tests, 0 failures, 0 skipped
+Total: 129 tests, 0 failures, 0 skipped
 ```
+
+---
+
+## Code coverage
+
+Coverage is measured with JaCoCo 0.8.13. The report is generated automatically on every
+`./gradlew test` run and written to `build/reports/jacoco/test/html/index.html`.
+
+`config/**` and the main application entry point are excluded from metrics as they contain
+Spring wiring rather than testable business logic.
+
+| Package | Instruction coverage | Branch coverage |
+|---------|---------------------|-----------------|
+| `aop` | 100% | n/a |
+| `controller` | 100% | n/a |
+| `dto.request` | 100% | n/a |
+| `dto.response` | 100% | n/a |
+| `exception` | 100% | n/a |
+| `health` | 100% | n/a |
+| `service.impl` | 100% | 100% |
+| `security` | 96% | 91% |
+| **Total** | **99%** | **95%** |
+
+The two uncovered instructions and one uncovered branch in `security` are inside
+`JwtAuthenticationFilter` — they guard an edge case where a valid token carries a null subject,
+which cannot occur with a well-formed HMAC-signed JWT. The current 80% minimum enforcement
+threshold is configured in `jacocoTestCoverageVerification` and can be raised to match the
+actual baseline.
