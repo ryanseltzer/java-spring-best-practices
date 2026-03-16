@@ -17,6 +17,7 @@ observability, and Spring Boot Actuator health monitoring. The domain is intenti
 - jjwt 0.12.6 for JWT parsing and signature verification
 - Lombok, Bean Validation (Jakarta)
 - JUnit 5, Mockito, AssertJ, MockMvc
+- JaCoCo 0.8.13 for test coverage reporting
 
 ---
 
@@ -217,7 +218,7 @@ indicator returns `DOWN` with the exception attached.
 
 ## Test suite
 
-The suite has 128 tests across 13 classes. Unit tests use plain JUnit 5 with Mockito where
+The suite has 129 tests across 12 classes. Unit tests use plain JUnit 5 with Mockito where
 dependencies need to be isolated. Integration tests load the full Spring context against a real
 H2 database with transactional rollback, so there is no shared state between runs. Controller
 tests use real signed JWTs rather than `@WithMockUser` so that the JWT filter chain is exercised
@@ -286,9 +287,9 @@ asserting that the HTTP status, app code, and message all match the enum definit
 catch-all handler returns 500 with a generic message and does not echo the original exception
 message back to the caller.
 
-### AppErrorCodeTest and AppExceptionTest (33 tests)
+### AppErrorCodeTest and AppExceptionTest (35 tests)
 Three parametrised tests cover every error code enum entry (7 values), verifying that each has
-a positive app code, a valid HTTP status, and a non-blank message. Six additional named tests
+a positive app code, a valid HTTP status, and a non-blank message. Seven additional named tests
 assert the exact app code and HTTP status for each specific enum constant. `AppExceptionTest`
 verifies that `AppException` correctly stores and exposes the error code it was constructed with.
 
@@ -309,14 +310,13 @@ when the repository throws the indicator returns `DOWN`.
 Run date: 16 March 2026
 
 ```
-BUILD SUCCESSFUL in 22s
+BUILD SUCCESSFUL in 19s
 
-learn.spring_best_practices.ApplicationTests                                   1 / 1 passed
 learn.spring_best_practices.aop.ServiceExecutionAspectTest                     2 / 2 passed
 learn.spring_best_practices.controller.DestinationControllerTest              20 / 20 passed
 learn.spring_best_practices.dto.DestinationRequestValidationTest              19 / 19 passed
-learn.spring_best_practices.exception.AppErrorCodeTest                        27 / 27 passed
-learn.spring_best_practices.exception.AppExceptionTest                         6 / 6 passed
+learn.spring_best_practices.exception.AppErrorCodeTest                        28 / 28 passed
+learn.spring_best_practices.exception.AppExceptionTest                         7 / 7 passed
 learn.spring_best_practices.exception.GlobalExceptionHandlerTest              10 / 10 passed
 learn.spring_best_practices.health.DestinationServiceHealthIndicatorTest       2 / 2 passed
 learn.spring_best_practices.repository.DestinationRepositoryTest               7 / 7 passed
@@ -325,5 +325,33 @@ learn.spring_best_practices.security.JwtUtilTest                               6
 learn.spring_best_practices.service.impl.DestinationServiceImplTest           10 / 10 passed
 learn.spring_best_practices.service.impl.LocationValidationServiceImplTest    12 / 12 passed
 
-Total: 128 tests, 0 failures, 0 skipped
+Total: 129 tests, 0 failures, 0 skipped
 ```
+
+---
+
+## Code coverage
+
+Coverage is measured with JaCoCo 0.8.13. The report is generated automatically on every
+`./gradlew test` run and written to `build/reports/jacoco/test/html/index.html`.
+
+`config/**` and the main application entry point are excluded from metrics as they contain
+Spring wiring rather than testable business logic.
+
+| Package | Instruction coverage | Branch coverage |
+|---------|---------------------|-----------------|
+| `aop` | 100% | n/a |
+| `controller` | 100% | n/a |
+| `dto.request` | 100% | n/a |
+| `dto.response` | 100% | n/a |
+| `exception` | 100% | n/a |
+| `health` | 100% | n/a |
+| `service.impl` | 100% | 100% |
+| `security` | 96% | 91% |
+| **Total** | **99%** | **95%** |
+
+The two uncovered instructions and one uncovered branch in `security` are inside
+`JwtAuthenticationFilter` — they guard an edge case where a valid token carries a null subject,
+which cannot occur with a well-formed HMAC-signed JWT. The current 80% minimum enforcement
+threshold is configured in `jacocoTestCoverageVerification` and can be raised to match the
+actual baseline.
