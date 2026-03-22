@@ -9,6 +9,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.List;
 
@@ -56,6 +58,58 @@ class GlobalExceptionHandlerTest {
         ResponseEntity<GlobalExceptionHandler.ErrorResponse> response = handler.handleValidation(ex);
 
         assertThat(response.getBody().fieldErrors()).hasSize(2);
+    }
+
+    // ── Missing request parameters ────────────────────────────────────────
+
+    @Test
+    void handleMissingParam_returns400WithParamNameInFieldErrors() {
+        MissingServletRequestParameterException ex =
+                new MissingServletRequestParameterException("dateFrom", "LocalDate");
+
+        ResponseEntity<GlobalExceptionHandler.ErrorResponse> response = handler.handleMissingParam(ex);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+        assertThat(response.getBody().appErrorCode()).isEqualTo(AppErrorCode.VALIDATION_FAILED.getAppCode());
+        assertThat(response.getBody().fieldErrors()).containsExactly("dateFrom: is required");
+        assertThat(response.getBody().timestamp()).isNotNull();
+    }
+
+    @Test
+    void handleMissingParam_differentParamName_includesCorrectNameInFieldErrors() {
+        MissingServletRequestParameterException ex =
+                new MissingServletRequestParameterException("dateTo", "LocalDate");
+
+        ResponseEntity<GlobalExceptionHandler.ErrorResponse> response = handler.handleMissingParam(ex);
+
+        assertThat(response.getBody().fieldErrors()).containsExactly("dateTo: is required");
+    }
+
+    // ── Type mismatch ─────────────────────────────────────────────────────
+
+    @Test
+    void handleTypeMismatch_returns400WithParamNameAndValueInFieldErrors() {
+        MethodArgumentTypeMismatchException ex = mock(MethodArgumentTypeMismatchException.class);
+        when(ex.getName()).thenReturn("dateFrom");
+        when(ex.getValue()).thenReturn("not-a-date");
+
+        ResponseEntity<GlobalExceptionHandler.ErrorResponse> response = handler.handleTypeMismatch(ex);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+        assertThat(response.getBody().appErrorCode()).isEqualTo(AppErrorCode.VALIDATION_FAILED.getAppCode());
+        assertThat(response.getBody().fieldErrors()).containsExactly("dateFrom: invalid value 'not-a-date'");
+        assertThat(response.getBody().timestamp()).isNotNull();
+    }
+
+    @Test
+    void handleTypeMismatch_doesNotExposeInternalDetail() {
+        MethodArgumentTypeMismatchException ex = mock(MethodArgumentTypeMismatchException.class);
+        when(ex.getName()).thenReturn("dateFrom");
+        when(ex.getValue()).thenReturn("bad-input");
+
+        ResponseEntity<GlobalExceptionHandler.ErrorResponse> response = handler.handleTypeMismatch(ex);
+
+        assertThat(response.getBody().message()).isEqualTo(AppErrorCode.VALIDATION_FAILED.getMessage());
     }
 
     // ── AppException (domain errors) ─────────────────────────────────────

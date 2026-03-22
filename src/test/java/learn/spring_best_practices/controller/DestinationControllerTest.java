@@ -3,6 +3,7 @@ package learn.spring_best_practices.controller;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import learn.spring_best_practices.dto.response.DestinationListResponse;
 import learn.spring_best_practices.dto.response.DestinationResponse;
 import learn.spring_best_practices.exception.AppErrorCode;
 import learn.spring_best_practices.exception.AppException;
@@ -22,11 +23,13 @@ import org.springframework.web.context.WebApplicationContext;
 import javax.crypto.SecretKey;
 import java.time.LocalDate;
 import java.util.Date;
+import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -382,5 +385,83 @@ class DestinationControllerTest {
                         .header("Authorization", bearerToken()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.appErrorCode").value(419));
+    }
+
+    // ── listDestinations: 200 OK ──────────────────────────────────────────
+
+    @Test
+    void listDestinations_validRange_returns200WithBody() throws Exception {
+        DestinationResponse item = DestinationResponse.builder()
+                .countryName("United Kingdom").cityName("London")
+                .dateFrom(LocalDate.of(2026, 6, 1)).dateTo(LocalDate.of(2026, 12, 1))
+                .build();
+        when(destinationService.listDestinations(any()))
+                .thenReturn(DestinationListResponse.of(List.of(item)));
+
+        mockMvc.perform(get(DELETE_URL)
+                        .header("Authorization", bearerToken())
+                        .param("dateFrom", "2026-06-01")
+                        .param("dateTo",   "2026-12-01"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(1))
+                .andExpect(jsonPath("$.destinations[0].countryName").value("United Kingdom"))
+                .andExpect(jsonPath("$.destinations[0].cityName").value("London"));
+    }
+
+    @Test
+    void listDestinations_noResults_returns200WithEmptyList() throws Exception {
+        when(destinationService.listDestinations(any()))
+                .thenReturn(DestinationListResponse.of(List.of()));
+
+        mockMvc.perform(get(DELETE_URL)
+                        .header("Authorization", bearerToken())
+                        .param("dateFrom", "2026-06-01")
+                        .param("dateTo",   "2026-12-01"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(0))
+                .andExpect(jsonPath("$.destinations").isEmpty());
+    }
+
+    // ── listDestinations: 401 Unauthenticated ─────────────────────────────
+
+    @Test
+    void listDestinations_noToken_returns401() throws Exception {
+        mockMvc.perform(get(DELETE_URL)
+                        .param("dateFrom", "2026-06-01")
+                        .param("dateTo",   "2026-12-01"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ── listDestinations: 400 Missing params ──────────────────────────────
+
+    @Test
+    void listDestinations_missingDateFrom_returns400() throws Exception {
+        mockMvc.perform(get(DELETE_URL)
+                        .header("Authorization", bearerToken())
+                        .param("dateTo", "2026-12-01"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void listDestinations_missingDateTo_returns400() throws Exception {
+        mockMvc.perform(get(DELETE_URL)
+                        .header("Authorization", bearerToken())
+                        .param("dateFrom", "2026-06-01"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ── listDestinations: 422 Invalid date range ───────────────────────────
+
+    @Test
+    void listDestinations_dateFromAfterDateTo_returns422() throws Exception {
+        when(destinationService.listDestinations(any()))
+                .thenThrow(new AppException(AppErrorCode.INVALID_DATE_RANGE));
+
+        mockMvc.perform(get(DELETE_URL)
+                        .header("Authorization", bearerToken())
+                        .param("dateFrom", "2026-12-01")
+                        .param("dateTo",   "2026-06-01"))
+                .andExpect(status().is(422))
+                .andExpect(jsonPath("$.appErrorCode").value(417));
     }
 }

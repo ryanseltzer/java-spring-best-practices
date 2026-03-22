@@ -1,8 +1,13 @@
 package learn.spring_best_practices.service.impl;
 
+import learn.spring_best_practices.dto.request.DestinationListRequest;
 import learn.spring_best_practices.dto.request.DestinationRequest;
 import learn.spring_best_practices.dto.request.RemoveDestinationRequest;
+import learn.spring_best_practices.dto.response.DestinationListResponse;
 import learn.spring_best_practices.dto.response.DestinationResponse;
+import java.util.List;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import learn.spring_best_practices.entity.Destination;
 import learn.spring_best_practices.entity.DestinationId;
 import learn.spring_best_practices.exception.AppErrorCode;
@@ -25,6 +30,7 @@ public class DestinationServiceImpl implements DestinationService {
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = "destinations", allEntries = true)
     public DestinationResponse addDestination(DestinationRequest request) {
         // Validate date range — same-day trips are valid, only reject dateFrom > dateTo
         if (request.getDateFrom().isAfter(request.getDateTo())) {
@@ -56,6 +62,7 @@ public class DestinationServiceImpl implements DestinationService {
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = "destinations", allEntries = true)
     public DestinationResponse removeDestination(RemoveDestinationRequest request) {
         DestinationId id = new DestinationId(request.countryName(), request.cityName());
         Destination destination = destinationRepository.findById(id)
@@ -75,5 +82,23 @@ public class DestinationServiceImpl implements DestinationService {
                 .dateFrom(request.getDateFrom())
                 .dateTo(request.getDateTo())
                 .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = "destinations", key = "#request.dateFrom + '-' + #request.dateTo")
+    public DestinationListResponse listDestinations(DestinationListRequest request) {
+        if (request.getDateFrom().isAfter(request.getDateTo())) {
+            throw new AppException(AppErrorCode.INVALID_DATE_RANGE);
+        }
+
+        List<DestinationResponse> results = destinationRepository
+                .findByDateRangeOverlap(request.getDateFrom(), request.getDateTo())
+                .stream()
+                .map(DestinationResponse::from)
+                .toList();
+
+        log.debug("listDestinations returned {} result(s)", results.size());
+        return DestinationListResponse.of(results);
     }
 }

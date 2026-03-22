@@ -1,7 +1,9 @@
 package learn.spring_best_practices.service.impl;
 
+import learn.spring_best_practices.dto.request.DestinationListRequest;
 import learn.spring_best_practices.dto.request.DestinationRequest;
 import learn.spring_best_practices.dto.request.RemoveDestinationRequest;
+import learn.spring_best_practices.dto.response.DestinationListResponse;
 import learn.spring_best_practices.dto.response.DestinationResponse;
 import learn.spring_best_practices.entity.Destination;
 import learn.spring_best_practices.entity.DestinationId;
@@ -9,6 +11,7 @@ import learn.spring_best_practices.exception.AppErrorCode;
 import learn.spring_best_practices.exception.AppException;
 import learn.spring_best_practices.repository.DestinationRepository;
 import learn.spring_best_practices.service.LocationValidationService;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -195,6 +198,65 @@ class DestinationServiceImplTest {
         verifyNoInteractions(destinationRepository);
     }
 
+    // ── listDestinations ──────────────────────────────────────────────────
+
+    @Test
+    void listDestinations_dateFromAfterDateTo_throwsInvalidDateRange() {
+        DestinationListRequest req = listRequest(DATE_TO, DATE_FROM);
+
+        assertThatThrownBy(() -> service.listDestinations(req))
+                .isInstanceOf(AppException.class)
+                .satisfies(e -> assertThat(((AppException) e).getErrorCode())
+                        .isEqualTo(AppErrorCode.INVALID_DATE_RANGE));
+
+        verifyNoInteractions(destinationRepository);
+    }
+
+    @Test
+    void listDestinations_validRange_returnsMatchingDestinations() {
+        DestinationId id = new DestinationId("United Kingdom", "London");
+        Destination dest = new Destination(id, DATE_FROM, DATE_TO);
+        when(destinationRepository.findByDateRangeOverlap(DATE_FROM, DATE_TO)).thenReturn(List.of(dest));
+
+        DestinationListResponse response = service.listDestinations(listRequest(DATE_FROM, DATE_TO));
+
+        assertThat(response.destinations()).hasSize(1);
+        assertThat(response.destinations().get(0).countryName()).isEqualTo("United Kingdom");
+        assertThat(response.destinations().get(0).cityName()).isEqualTo("London");
+        assertThat(response.count()).isEqualTo(1);
+    }
+
+    @Test
+    void listDestinations_noResultsInRange_returnsEmptyListWithZeroCount() {
+        when(destinationRepository.findByDateRangeOverlap(any(), any())).thenReturn(List.of());
+
+        DestinationListResponse response = service.listDestinations(listRequest(DATE_FROM, DATE_TO));
+
+        assertThat(response.destinations()).isEmpty();
+        assertThat(response.count()).isZero();
+    }
+
+    @Test
+    void listDestinations_multipleResults_allMappedCorrectly() {
+        Destination dest1 = new Destination(new DestinationId("United Kingdom", "London"), DATE_FROM, DATE_TO);
+        Destination dest2 = new Destination(new DestinationId("France", "Paris"), DATE_FROM, DATE_TO);
+        when(destinationRepository.findByDateRangeOverlap(DATE_FROM, DATE_TO)).thenReturn(List.of(dest1, dest2));
+
+        DestinationListResponse response = service.listDestinations(listRequest(DATE_FROM, DATE_TO));
+
+        assertThat(response.count()).isEqualTo(2);
+        assertThat(response.destinations()).extracting("countryName")
+                .containsExactly("United Kingdom", "France");
+    }
+
+    @Test
+    void listDestinations_sameDayRange_isValid() {
+        when(destinationRepository.findByDateRangeOverlap(DATE_FROM, DATE_FROM)).thenReturn(List.of());
+
+        assertThat(service.listDestinations(listRequest(DATE_FROM, DATE_FROM)).destinations()).isEmpty();
+        verify(destinationRepository).findByDateRangeOverlap(DATE_FROM, DATE_FROM);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────
 
     private DestinationRequest validRequest() {
@@ -206,6 +268,13 @@ class DestinationServiceImplTest {
         DestinationRequest req = new DestinationRequest();
         req.setCountryName(country);
         req.setCityName(city);
+        req.setDateFrom(from);
+        req.setDateTo(to);
+        return req;
+    }
+
+    private DestinationListRequest listRequest(LocalDate from, LocalDate to) {
+        DestinationListRequest req = new DestinationListRequest();
         req.setDateFrom(from);
         req.setDateTo(to);
         return req;

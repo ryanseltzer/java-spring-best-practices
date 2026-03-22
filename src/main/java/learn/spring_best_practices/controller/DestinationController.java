@@ -3,21 +3,29 @@ package learn.spring_best_practices.controller;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import learn.spring_best_practices.dto.request.DestinationListRequest;
 import learn.spring_best_practices.dto.request.DestinationRequest;
 import learn.spring_best_practices.dto.request.RemoveDestinationRequest;
+import learn.spring_best_practices.dto.response.DestinationListResponse;
 import learn.spring_best_practices.dto.response.DestinationResponse;
 import learn.spring_best_practices.service.DestinationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.time.LocalDate;
+
 
 
 @RestController
@@ -59,5 +67,20 @@ public class DestinationController {
         DestinationResponse response = destinationService.verifyDestination(request);
         return ResponseEntity.status(HttpStatus.OK).body(response);
     }
-    
+
+    /**
+     * GET /api/destinations?dateFrom=YYYY-MM-DD&dateTo=YYYY-MM-DD
+     *
+     * Returns all destinations whose date range overlaps with the requested range.
+     */
+    @GetMapping
+    public ResponseEntity<DestinationListResponse> listDestinations(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateFrom,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateTo) {
+        log.debug("listDestinations called by authenticated principal");
+        DestinationListRequest request = new DestinationListRequest();
+        request.setDateFrom(dateFrom);
+        request.setDateTo(dateTo);
+        return ResponseEntity.ok(destinationService.listDestinations(request));
+    }
 }
