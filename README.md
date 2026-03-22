@@ -130,6 +130,48 @@ Content-Type: application/json
 | 401 Unauthorized | JWT is missing, expired, or has an invalid signature |
 | 422 Unprocessable Content | Country not recognised or city name too short |
 
+### GET /api/destinations
+
+Returns all destinations whose date range overlaps with the requested window.
+The date span must not exceed 366 days to prevent unbounded result sets.
+
+**Request**
+
+```
+GET /api/destinations?dateFrom=2025-06-01&dateTo=2025-12-01
+Authorization: Bearer <token>
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `dateFrom` | `YYYY-MM-DD` | Start of the search window (inclusive, required) |
+| `dateTo` | `YYYY-MM-DD` | End of the search window (inclusive, required) |
+
+**Responses**
+
+| Status | Meaning |
+|--------|---------|
+| 200 OK | List of matching destinations; `count` field gives the total |
+| 400 Bad Request | Missing or malformed date parameter, or date span exceeds 366 days |
+| 401 Unauthorized | JWT is missing, expired, or has an invalid signature |
+| 422 Unprocessable Content | `dateFrom` is after `dateTo` |
+
+**Response body (200)**
+
+```json
+{
+  "destinations": [
+    {
+      "countryName": "France",
+      "cityName": "Paris",
+      "dateFrom": "2025-06-01",
+      "dateTo": "2025-06-10"
+    }
+  ],
+  "count": 1
+}
+```
+
 ---
 
 ## Security and best practices
@@ -155,7 +197,8 @@ string-concatenated SQL anywhere in the codebase.
 ### A04 — Insecure Design
 Date range validation, location validation, and duplicate detection all run as separate,
 testable concerns before any write to the database occurs. Same-day trips (`dateFrom == dateTo`)
-are explicitly supported.
+are explicitly supported. The `GET /api/destinations` endpoint enforces a maximum search window
+of 366 days to prevent an authenticated user from dumping the entire table in a single request.
 
 ### A05 — Security Misconfiguration
 HTTP response headers are hardened in `SecurityConfig`: `X-Content-Type-Options`,

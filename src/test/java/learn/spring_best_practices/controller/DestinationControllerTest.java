@@ -68,9 +68,9 @@ class DestinationControllerTest {
     private static final String SECRET =
             "dGhpcy1pcy1hLXZlcnktbG9uZy1zZWNyZXQta2V5LWZvci1qd3Qtc2lnbmluZw==";
 
-    private static final String ADD_URL    = "/api/destinations/add";
-    private static final String VERIFY_URL = "/api/destinations/verify";
-    private static final String DELETE_URL = "/api/destinations";
+    private static final String BASE_URL   = "/api/destinations";
+    private static final String ADD_URL    = BASE_URL + "/add";
+    private static final String VERIFY_URL = BASE_URL + "/verify";
 
     private String bearerToken() {
         SecretKey key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(SECRET));
@@ -350,7 +350,7 @@ class DestinationControllerTest {
                 .build();
         when(destinationService.removeDestination(any())).thenReturn(stub);
 
-        mockMvc.perform(delete(DELETE_URL + "/United Kingdom/London")
+        mockMvc.perform(delete(BASE_URL + "/United Kingdom/London")
                         .header("Authorization", bearerToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.countryName").value("United Kingdom"))
@@ -361,7 +361,7 @@ class DestinationControllerTest {
 
     @Test
     void removeDestination_injectionInPath_returns400() throws Exception {
-        mockMvc.perform(delete(DELETE_URL + "/<script>alert(1)<script>/London")
+        mockMvc.perform(delete(BASE_URL + "/<script>alert(1)<script>/London")
                         .header("Authorization", bearerToken()))
                 .andExpect(status().isBadRequest());
     }
@@ -370,7 +370,7 @@ class DestinationControllerTest {
 
     @Test
     void removeDestination_noToken_returns401() throws Exception {
-        mockMvc.perform(delete(DELETE_URL + "/United Kingdom/London"))
+        mockMvc.perform(delete(BASE_URL + "/United Kingdom/London"))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -381,7 +381,7 @@ class DestinationControllerTest {
         when(destinationService.removeDestination(any()))
                 .thenThrow(new AppException(AppErrorCode.DESTINATION_NOT_FOUND));
 
-        mockMvc.perform(delete(DELETE_URL + "/United Kingdom/London")
+        mockMvc.perform(delete(BASE_URL + "/United Kingdom/London")
                         .header("Authorization", bearerToken()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.appErrorCode").value(419));
@@ -398,7 +398,7 @@ class DestinationControllerTest {
         when(destinationService.listDestinations(any()))
                 .thenReturn(DestinationListResponse.of(List.of(item)));
 
-        mockMvc.perform(get(DELETE_URL)
+        mockMvc.perform(get(BASE_URL)
                         .header("Authorization", bearerToken())
                         .param("dateFrom", "2026-06-01")
                         .param("dateTo",   "2026-12-01"))
@@ -413,7 +413,7 @@ class DestinationControllerTest {
         when(destinationService.listDestinations(any()))
                 .thenReturn(DestinationListResponse.of(List.of()));
 
-        mockMvc.perform(get(DELETE_URL)
+        mockMvc.perform(get(BASE_URL)
                         .header("Authorization", bearerToken())
                         .param("dateFrom", "2026-06-01")
                         .param("dateTo",   "2026-12-01"))
@@ -426,7 +426,7 @@ class DestinationControllerTest {
 
     @Test
     void listDestinations_noToken_returns401() throws Exception {
-        mockMvc.perform(get(DELETE_URL)
+        mockMvc.perform(get(BASE_URL)
                         .param("dateFrom", "2026-06-01")
                         .param("dateTo",   "2026-12-01"))
                 .andExpect(status().isUnauthorized());
@@ -436,7 +436,7 @@ class DestinationControllerTest {
 
     @Test
     void listDestinations_missingDateFrom_returns400() throws Exception {
-        mockMvc.perform(get(DELETE_URL)
+        mockMvc.perform(get(BASE_URL)
                         .header("Authorization", bearerToken())
                         .param("dateTo", "2026-12-01"))
                 .andExpect(status().isBadRequest());
@@ -444,7 +444,7 @@ class DestinationControllerTest {
 
     @Test
     void listDestinations_missingDateTo_returns400() throws Exception {
-        mockMvc.perform(get(DELETE_URL)
+        mockMvc.perform(get(BASE_URL)
                         .header("Authorization", bearerToken())
                         .param("dateFrom", "2026-06-01"))
                 .andExpect(status().isBadRequest());
@@ -457,7 +457,7 @@ class DestinationControllerTest {
         when(destinationService.listDestinations(any()))
                 .thenThrow(new AppException(AppErrorCode.INVALID_DATE_RANGE));
 
-        mockMvc.perform(get(DELETE_URL)
+        mockMvc.perform(get(BASE_URL)
                         .header("Authorization", bearerToken())
                         .param("dateFrom", "2026-12-01")
                         .param("dateTo",   "2026-06-01"))

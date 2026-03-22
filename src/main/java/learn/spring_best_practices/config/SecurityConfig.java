@@ -20,9 +20,11 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthFilter;
 
     @Bean
+    @SuppressWarnings("java:S4502") // Stateless JWT API — CSRF not applicable
     SecurityFilterChain securityFilterChain(HttpSecurity http) {
         http
                 // A01/A07: CSRF disabled — stateless REST API authenticated via JWT (no session cookies)
+                
                 .csrf(csrf -> csrf.disable())
 
                 // A07: Enforce stateless sessions — no HttpSession created or used
