@@ -2,8 +2,9 @@
 
 A Spring Boot REST API demonstrating practical application of the OWASP Top 10 mitigations,
 structured exception handling, Bean Validation, JWT-based stateless authentication, AOP-based
-observability, and Spring Boot Actuator health monitoring. The domain is intentionally simple
-— storing travel destinations — so the focus stays on the plumbing rather than business complexity.
+observability, Kafka event streaming, and Spring Boot Actuator health monitoring. The domain is
+intentionally simple — storing travel destinations — so the focus stays on the plumbing rather
+than business complexity.
 
 ---
 
@@ -13,7 +14,8 @@ observability, and Spring Boot Actuator health monitoring. The domain is intenti
 - Spring Security 6 (stateless JWT filter chain)
 - Spring Data JPA with H2 in-memory database
 - Spring Boot Actuator (custom health indicator)
-- AspectJ (`aspectjweaver`) for AOP execution logging
+- AspectJ (`aspectjweaver`) for AOP execution logging and Kafka event publishing
+- Spring Kafka for event streaming
 - jjwt 0.12.6 for JWT parsing and signature verification
 - Lombok, Bean Validation (Jakarta)
 - JUnit 5, Mockito, AssertJ, MockMvc
@@ -39,6 +41,9 @@ Then start the app:
 
 The server starts on port 8080. The H2 console is available at `/h2-console` and is intended
 for local development only — it must be disabled before any deployment.
+
+The application expects a Kafka broker at `localhost:9092` by default. Override
+`spring.kafka.bootstrap-servers` in `application-dev.yaml` for a different address.
 
 ---
 
@@ -75,6 +80,41 @@ Content-Type: application/json
 | 409 Conflict | A destination for that country/city combination already exists |
 | 422 Unprocessable Content | Country not recognised, city name too short, or dateFrom is after dateTo |
 | 500 Internal Server Error | Unhandled server fault; no internal detail is returned to the caller |
+
+On success a `VacationEvent` Kafka message is published with `eventType: INSERT`.
+
+---
+
+### PUT /api/destinations/update
+
+Updates the date range for an existing destination.
+
+**Request**
+
+```
+PUT /api/destinations/update
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "countryName": "France",
+  "cityName": "Paris",
+  "dateFrom": "2025-07-01",
+  "dateTo": "2025-07-14"
+}
+```
+
+**Responses**
+
+| Status | Meaning |
+|--------|---------|
+| 200 OK | Destination updated; response body mirrors the updated fields |
+| 400 Bad Request | Bean Validation failed; `fieldErrors` array lists each violation |
+| 401 Unauthorized | JWT is missing, expired, or has an invalid signature |
+| 404 Not Found | No destination exists for that country/city combination |
+| 422 Unprocessable Content | Country not recognised, city name too short, or dateFrom is after dateTo |
+
+On success a `VacationEvent` Kafka message is published with `eventType: UPDATE`.
 
 ---
 
@@ -130,7 +170,9 @@ Content-Type: application/json
 | 401 Unauthorized | JWT is missing, expired, or has an invalid signature |
 | 422 Unprocessable Content | Country not recognised or city name too short |
 
-### GET /api/destinations
+---
+
+### GET /api/destinations/list
 
 Returns all destinations whose date range overlaps with the requested window.
 The date span must not exceed 366 days to prevent unbounded result sets.
@@ -138,7 +180,7 @@ The date span must not exceed 366 days to prevent unbounded result sets.
 **Request**
 
 ```
-GET /api/destinations?dateFrom=2025-06-01&dateTo=2025-12-01
+GET /api/destinations/list?dateFrom=2025-06-01&dateTo=2025-12-01
 Authorization: Bearer <token>
 ```
 
@@ -197,8 +239,9 @@ string-concatenated SQL anywhere in the codebase.
 ### A04 — Insecure Design
 Date range validation, location validation, and duplicate detection all run as separate,
 testable concerns before any write to the database occurs. Same-day trips (`dateFrom == dateTo`)
-are explicitly supported. The `GET /api/destinations` endpoint enforces a maximum search window
-of 366 days to prevent an authenticated user from dumping the entire table in a single request.
+are explicitly supported. The `GET /api/destinations/list` endpoint enforces a maximum search
+window of 366 days to prevent an authenticated user from dumping the entire table in a single
+request.
 
 ### A05 — Security Misconfiguration
 HTTP response headers are hardened in `SecurityConfig`: `X-Content-Type-Options`,
@@ -228,9 +271,15 @@ entire service layer via AOP. Successful calls are logged at DEBUG level with el
 exceptions are logged at WARN level with the exception type and elapsed time. This keeps
 timing and error observability out of the business logic itself.
 
+`DestinationKafkaAspect` publishes a structured `DestinationEvent` to the `VacationEvent` Kafka
+topic after every successful insert or update, providing an audit trail of mutations without
+coupling the service layer to the messaging infrastructure.
+
 ---
 
 ## AOP
+
+### ServiceExecutionAspect
 
 `ServiceExecutionAspect` is an `@Around` aspect that intercepts every method in the
 `learn.spring_best_practices.service` package and its sub-packages. For each call it records:
@@ -241,6 +290,25 @@ timing and error observability out of the business logic itself.
 
 Successful calls emit a DEBUG log; thrown exceptions emit a WARN log and then re-throw the
 original exception unchanged, so the aspect is transparent to callers.
+
+### DestinationKafkaAspect
+
+`DestinationKafkaAspect` is an `@AfterReturning` aspect that fires only when `addDestination`
+or `updateDestination` on `DestinationServiceImpl` return successfully. It publishes a
+`DestinationEvent` to the `VacationEvent` Kafka topic containing:
+
+| Field | Description |
+|-------|-------------|
+| `countryName` | Country of the destination |
+| `cityName` | City of the destination |
+| `dateFrom` | Start date of the travel window |
+| `dateTo` | End date of the travel window |
+| `eventType` | `INSERT` for new destinations, `UPDATE` for date-range changes |
+| `occurredAt` | UTC timestamp of when the event was published |
+
+The message key is `countryName:cityName`, ensuring all events for the same destination land on
+the same partition and are therefore ordered. Publish failures are handled asynchronously in the
+`whenComplete` callback and logged at WARN level — they do not propagate to the HTTP caller.
 
 ---
 
@@ -261,7 +329,7 @@ indicator returns `DOWN` with the exception attached.
 
 ## Test suite
 
-The suite has 129 tests across 12 classes. Unit tests use plain JUnit 5 with Mockito where
+The suite has 134 tests across 13 classes. Unit tests use plain JUnit 5 with Mockito where
 dependencies need to be isolated. Integration tests load the full Spring context against a real
 H2 database with transactional rollback, so there is no shared state between runs. Controller
 tests use real signed JWTs rather than `@WithMockUser` so that the JWT filter chain is exercised
@@ -341,6 +409,13 @@ Unit tests the AOP aspect in isolation using a mocked `ProceedingJoinPoint`. Cov
 successful method call returns the result from `proceed()`; a throwing method call re-throws
 the original exception unchanged.
 
+### DestinationKafkaAspectTest (5 tests)
+Unit tests the Kafka aspect in isolation using a mocked `KafkaTemplate`. The `@Value`-bound
+topic name is injected via `ReflectionTestUtils`. Covers: `onAddDestination` publishes an
+INSERT event with the correct country, city, date, and `occurredAt` fields; `onUpdateDestination`
+publishes an UPDATE event; the message key is formatted as `countryName:cityName`; a broker
+failure on add does not throw; a broker failure on update does not throw.
+
 ### DestinationServiceHealthIndicatorTest (2 tests)
 Unit tests the Actuator health indicator with a mocked repository. Covers: when the repository
 is reachable the indicator returns `UP` with the live destination count in the details map;
@@ -350,25 +425,26 @@ when the repository throws the indicator returns `DOWN`.
 
 ## Most recent test run
 
-Run date: 16 March 2026
+Run date: 5 April 2026
 
 ```
 BUILD SUCCESSFUL in 19s
 
-learn.spring_best_practices.aop.ServiceExecutionAspectTest                     2 / 2 passed
-learn.spring_best_practices.controller.DestinationControllerTest              20 / 20 passed
-learn.spring_best_practices.dto.DestinationRequestValidationTest              19 / 19 passed
-learn.spring_best_practices.exception.AppErrorCodeTest                        28 / 28 passed
-learn.spring_best_practices.exception.AppExceptionTest                         7 / 7 passed
-learn.spring_best_practices.exception.GlobalExceptionHandlerTest              10 / 10 passed
-learn.spring_best_practices.health.DestinationServiceHealthIndicatorTest       2 / 2 passed
-learn.spring_best_practices.repository.DestinationRepositoryTest               7 / 7 passed
-learn.spring_best_practices.security.JwtAuthenticationFilterTest               6 / 6 passed
-learn.spring_best_practices.security.JwtUtilTest                               6 / 6 passed
-learn.spring_best_practices.service.impl.DestinationServiceImplTest           10 / 10 passed
-learn.spring_best_practices.service.impl.LocationValidationServiceImplTest    12 / 12 passed
+learn.spring_best_practices.aop.DestinationKafkaAspectTest                      5 / 5 passed
+learn.spring_best_practices.aop.ServiceExecutionAspectTest                      2 / 2 passed
+learn.spring_best_practices.controller.DestinationControllerTest               20 / 20 passed
+learn.spring_best_practices.dto.DestinationRequestValidationTest               19 / 19 passed
+learn.spring_best_practices.exception.AppErrorCodeTest                         28 / 28 passed
+learn.spring_best_practices.exception.AppExceptionTest                          7 / 7 passed
+learn.spring_best_practices.exception.GlobalExceptionHandlerTest               10 / 10 passed
+learn.spring_best_practices.health.DestinationServiceHealthIndicatorTest        2 / 2 passed
+learn.spring_best_practices.repository.DestinationRepositoryTest                7 / 7 passed
+learn.spring_best_practices.security.JwtAuthenticationFilterTest                6 / 6 passed
+learn.spring_best_practices.security.JwtUtilTest                                6 / 6 passed
+learn.spring_best_practices.service.impl.DestinationServiceImplTest            10 / 10 passed
+learn.spring_best_practices.service.impl.LocationValidationServiceImplTest     12 / 12 passed
 
-Total: 129 tests, 0 failures, 0 skipped
+Total: 134 tests, 0 failures, 0 skipped
 ```
 
 ---
@@ -387,6 +463,7 @@ Spring wiring rather than testable business logic.
 | `controller` | 100% | n/a |
 | `dto.request` | 100% | n/a |
 | `dto.response` | 100% | n/a |
+| `dto.event` | 100% | n/a |
 | `exception` | 100% | n/a |
 | `health` | 100% | n/a |
 | `service.impl` | 100% | 100% |
