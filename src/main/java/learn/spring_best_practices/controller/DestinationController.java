@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -73,7 +74,7 @@ public class DestinationController {
      *
      * Returns all destinations whose date range overlaps with the requested range.
      */
-    @GetMapping
+    @GetMapping("/list")
     public ResponseEntity<DestinationListResponse> listDestinations(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateFrom,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateTo) {
@@ -83,4 +84,12 @@ public class DestinationController {
         request.setDateTo(dateTo);
         return ResponseEntity.ok(destinationService.listDestinations(request));
     }
+
+    @PutMapping("/update")
+    public ResponseEntity<DestinationResponse> updateDestination(@Valid @RequestBody DestinationRequest request) {
+        log.debug("updateDestination called by authenticated principal");
+        DestinationResponse response = destinationService.updateDestination(request);
+        return ResponseEntity.ok(response);
+    }
+    
 }

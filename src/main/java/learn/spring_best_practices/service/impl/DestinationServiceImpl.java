@@ -40,10 +40,7 @@ public class DestinationServiceImpl implements DestinationService {
         locationValidationService.validateLocation(request.getCountryName(), request.getCityName());
 
         // A01: explicit duplicate check before insert — not relying solely on DB constraint
-        DestinationId id = new DestinationId(
-                request.getCountryName().trim(),
-                request.getCityName().trim()
-        );
+        DestinationId id = buildId(request);
         if (destinationRepository.existsById(id)) {
             throw new AppException(AppErrorCode.DUPLICATE_DESTINATION);
         }
@@ -103,6 +100,29 @@ public class DestinationServiceImpl implements DestinationService {
         return DestinationListResponse.of(results);
     }
 
+    @Override
+    @Transactional
+    @CacheEvict(cacheNames = "destinations", allEntries = true)
+    public DestinationResponse updateDestination(DestinationRequest request) {
+        validateDateRange(request.getDateFrom(), request.getDateTo());
+
+        locationValidationService.validateLocation(request.getCountryName(), request.getCityName());
+
+        DestinationId id = buildId(request);
+        Destination destination = destinationRepository.findById(id)
+                .orElseThrow(() -> new AppException(AppErrorCode.DESTINATION_NOT_FOUND));
+
+        destination.setDateFrom(request.getDateFrom());
+        destination.setDateTo(request.getDateTo());
+
+        Destination saved = destinationRepository.save(destination);
+
+        log.info("Destination updated [country={}, city={}]",
+                saved.getId().getCountryName(), saved.getId().getCityName());
+
+        return DestinationResponse.from(saved);
+    }
+
     // ── Shared validation ─────────────────────────────────────────────────
 
     /** Same-day trips (dateFrom == dateTo) are valid; only reject dateFrom > dateTo. */
@@ -110,5 +130,9 @@ public class DestinationServiceImpl implements DestinationService {
         if (dateFrom.isAfter(dateTo)) {
             throw new AppException(AppErrorCode.INVALID_DATE_RANGE);
         }
+    }
+
+    private DestinationId buildId(DestinationRequest request) {
+        return new DestinationId(request.getCountryName().trim(), request.getCityName().trim());
     }
 }

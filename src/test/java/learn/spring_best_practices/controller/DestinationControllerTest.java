@@ -12,6 +12,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import java.util.stream.Stream;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
@@ -31,6 +35,7 @@ import static org.springframework.security.test.web.servlet.setup.SecurityMockMv
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -71,6 +76,8 @@ class DestinationControllerTest {
     private static final String BASE_URL   = "/api/destinations";
     private static final String ADD_URL    = BASE_URL + "/add";
     private static final String VERIFY_URL = BASE_URL + "/verify";
+    private static final String LIST_URL   = BASE_URL + "/list";
+    private static final String UPDATE_URL = BASE_URL + "/update";
 
     private String bearerToken() {
         SecretKey key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(SECRET));
@@ -398,7 +405,7 @@ class DestinationControllerTest {
         when(destinationService.listDestinations(any()))
                 .thenReturn(DestinationListResponse.of(List.of(item)));
 
-        mockMvc.perform(get(BASE_URL)
+        mockMvc.perform(get(LIST_URL)
                         .header("Authorization", bearerToken())
                         .param("dateFrom", "2026-06-01")
                         .param("dateTo",   "2026-12-01"))
@@ -413,7 +420,7 @@ class DestinationControllerTest {
         when(destinationService.listDestinations(any()))
                 .thenReturn(DestinationListResponse.of(List.of()));
 
-        mockMvc.perform(get(BASE_URL)
+        mockMvc.perform(get(LIST_URL)
                         .header("Authorization", bearerToken())
                         .param("dateFrom", "2026-06-01")
                         .param("dateTo",   "2026-12-01"))
@@ -426,7 +433,7 @@ class DestinationControllerTest {
 
     @Test
     void listDestinations_noToken_returns401() throws Exception {
-        mockMvc.perform(get(BASE_URL)
+        mockMvc.perform(get(LIST_URL)
                         .param("dateFrom", "2026-06-01")
                         .param("dateTo",   "2026-12-01"))
                 .andExpect(status().isUnauthorized());
@@ -436,7 +443,7 @@ class DestinationControllerTest {
 
     @Test
     void listDestinations_missingDateFrom_returns400() throws Exception {
-        mockMvc.perform(get(BASE_URL)
+        mockMvc.perform(get(LIST_URL)
                         .header("Authorization", bearerToken())
                         .param("dateTo", "2026-12-01"))
                 .andExpect(status().isBadRequest());
@@ -444,7 +451,7 @@ class DestinationControllerTest {
 
     @Test
     void listDestinations_missingDateTo_returns400() throws Exception {
-        mockMvc.perform(get(BASE_URL)
+        mockMvc.perform(get(LIST_URL)
                         .header("Authorization", bearerToken())
                         .param("dateFrom", "2026-06-01"))
                 .andExpect(status().isBadRequest());
@@ -457,10 +464,124 @@ class DestinationControllerTest {
         when(destinationService.listDestinations(any()))
                 .thenThrow(new AppException(AppErrorCode.INVALID_DATE_RANGE));
 
-        mockMvc.perform(get(BASE_URL)
+        mockMvc.perform(get(LIST_URL)
                         .header("Authorization", bearerToken())
                         .param("dateFrom", "2026-12-01")
                         .param("dateTo",   "2026-06-01"))
+                .andExpect(status().is(422))
+                .andExpect(jsonPath("$.appErrorCode").value(417));
+    }
+
+    // ── updateDestination: 200 OK ─────────────────────────────────────────
+
+    @Test
+    void updateDestination_validRequest_returns200WithBody() throws Exception {
+        DestinationResponse stub = DestinationResponse.builder()
+                .countryName("United Kingdom").cityName("London")
+                .dateFrom(LocalDate.of(2027, 1, 1)).dateTo(LocalDate.of(2027, 6, 1))
+                .build();
+        when(destinationService.updateDestination(any())).thenReturn(stub);
+
+        mockMvc.perform(put(UPDATE_URL)
+                        .header("Authorization", bearerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.countryName").value("United Kingdom"))
+                .andExpect(jsonPath("$.cityName").value("London"))
+                .andExpect(jsonPath("$.dateFrom").value("2027-01-01"))
+                .andExpect(jsonPath("$.dateTo").value("2027-06-01"));
+    }
+
+    // ── updateDestination: 400 Validation ────────────────────────────────
+
+    static Stream<String> invalidUpdateBodies() {
+        return Stream.of(
+                """
+                {"countryName":"","cityName":"London","dateFrom":"2026-06-01","dateTo":"2026-12-01"}
+                """,
+                """
+                {"countryName":"<script>xss</script>","cityName":"London","dateFrom":"2026-06-01","dateTo":"2026-12-01"}
+                """,
+                """
+                {"countryName":"United Kingdom","cityName":"London"}
+                """
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidUpdateBodies")
+    void updateDestination_invalidBody_returns400(String body) throws Exception {
+        mockMvc.perform(put(UPDATE_URL)
+                        .header("Authorization", bearerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.appErrorCode").value(AppErrorCode.VALIDATION_FAILED.getAppCode()));
+    }
+
+    // ── updateDestination: 401 Unauthenticated ────────────────────────────
+
+    @Test
+    void updateDestination_noToken_returns401() throws Exception {
+        mockMvc.perform(put(UPDATE_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ── updateDestination: 404 Not Found ──────────────────────────────────
+
+    @Test
+    void updateDestination_notFound_returns404WithAppCode419() throws Exception {
+        when(destinationService.updateDestination(any()))
+                .thenThrow(new AppException(AppErrorCode.DESTINATION_NOT_FOUND));
+
+        mockMvc.perform(put(UPDATE_URL)
+                        .header("Authorization", bearerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.appErrorCode").value(419));
+    }
+
+    // ── updateDestination: 422 Domain errors ──────────────────────────────
+
+    @Test
+    void updateDestination_invalidCountry_returns422WithAppCode415() throws Exception {
+        when(destinationService.updateDestination(any()))
+                .thenThrow(new AppException(AppErrorCode.INVALID_COUNTRY));
+
+        mockMvc.perform(put(UPDATE_URL)
+                        .header("Authorization", bearerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().is(422))
+                .andExpect(jsonPath("$.appErrorCode").value(415));
+    }
+
+    @Test
+    void updateDestination_invalidCity_returns422WithAppCode416() throws Exception {
+        when(destinationService.updateDestination(any()))
+                .thenThrow(new AppException(AppErrorCode.INVALID_CITY));
+
+        mockMvc.perform(put(UPDATE_URL)
+                        .header("Authorization", bearerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().is(422))
+                .andExpect(jsonPath("$.appErrorCode").value(416));
+    }
+
+    @Test
+    void updateDestination_invalidDateRange_returns422WithAppCode417() throws Exception {
+        when(destinationService.updateDestination(any()))
+                .thenThrow(new AppException(AppErrorCode.INVALID_DATE_RANGE));
+
+        mockMvc.perform(put(UPDATE_URL)
+                        .header("Authorization", bearerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
                 .andExpect(status().is(422))
                 .andExpect(jsonPath("$.appErrorCode").value(417));
     }

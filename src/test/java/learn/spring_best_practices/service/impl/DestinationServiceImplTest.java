@@ -257,6 +257,84 @@ class DestinationServiceImplTest {
         verify(destinationRepository).findByDateRangeOverlap(DATE_FROM, DATE_FROM);
     }
 
+    // ── updateDestination ─────────────────────────────────────────────────
+
+    @Test
+    void updateDestination_validRequest_updatesAndReturnsResponse() {
+        LocalDate newFrom = LocalDate.of(2027, 1, 1);
+        LocalDate newTo   = LocalDate.of(2027, 6, 1);
+        DestinationRequest req = buildRequest("United Kingdom", "London", newFrom, newTo);
+        DestinationId id = new DestinationId("United Kingdom", "London");
+        Destination existing = new Destination(id, DATE_FROM, DATE_TO);
+        Destination saved    = new Destination(id, newFrom, newTo);
+
+        when(destinationRepository.findById(id)).thenReturn(Optional.of(existing));
+        when(destinationRepository.save(existing)).thenReturn(saved);
+
+        DestinationResponse response = service.updateDestination(req);
+
+        assertThat(response.countryName()).isEqualTo("United Kingdom");
+        assertThat(response.cityName()).isEqualTo("London");
+        assertThat(response.dateFrom()).isEqualTo(newFrom);
+        assertThat(response.dateTo()).isEqualTo(newTo);
+
+        verify(destinationRepository).save(existing);
+        verify(locationValidationService).validateLocation("United Kingdom", "London");
+    }
+
+    @Test
+    void updateDestination_dateFromAfterDateTo_throwsInvalidDateRange() {
+        DestinationRequest req = buildRequest("United Kingdom", "London", DATE_TO, DATE_FROM);
+
+        assertThatThrownBy(() -> service.updateDestination(req))
+                .isInstanceOf(AppException.class)
+                .satisfies(e -> assertThat(((AppException) e).getErrorCode())
+                        .isEqualTo(AppErrorCode.INVALID_DATE_RANGE));
+
+        verifyNoInteractions(locationValidationService, destinationRepository);
+    }
+
+    @Test
+    void updateDestination_locationValidationFails_propagatesException() {
+        DestinationRequest req = buildRequest("Narnia", "Castle", DATE_FROM, DATE_TO);
+        doThrow(new AppException(AppErrorCode.INVALID_COUNTRY))
+                .when(locationValidationService).validateLocation(any(), any());
+
+        assertThatThrownBy(() -> service.updateDestination(req))
+                .isInstanceOf(AppException.class)
+                .satisfies(e -> assertThat(((AppException) e).getErrorCode())
+                        .isEqualTo(AppErrorCode.INVALID_COUNTRY));
+
+        verifyNoInteractions(destinationRepository);
+    }
+
+    @Test
+    void updateDestination_notFound_throwsDestinationNotFound() {
+        DestinationRequest req = validRequest();
+        when(destinationRepository.findById(any())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.updateDestination(req))
+                .isInstanceOf(AppException.class)
+                .satisfies(e -> assertThat(((AppException) e).getErrorCode())
+                        .isEqualTo(AppErrorCode.DESTINATION_NOT_FOUND));
+
+        verify(destinationRepository, never()).save(any());
+    }
+
+    @Test
+    void updateDestination_trimsWhitespaceForLookup() {
+        DestinationRequest req = buildRequest("  United Kingdom  ", "  London  ", DATE_FROM, DATE_TO);
+        DestinationId id = new DestinationId("United Kingdom", "London");
+        Destination existing = new Destination(id, DATE_FROM, DATE_TO);
+
+        when(destinationRepository.findById(id)).thenReturn(Optional.of(existing));
+        when(destinationRepository.save(existing)).thenReturn(existing);
+
+        service.updateDestination(req);
+
+        verify(destinationRepository).findById(id);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────
 
     private DestinationRequest validRequest() {
