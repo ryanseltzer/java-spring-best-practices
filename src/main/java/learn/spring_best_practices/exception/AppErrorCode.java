@@ -22,6 +22,9 @@ public enum AppErrorCode {
     INVALID_CITY            (416, 422, "The provided city name is invalid"),
     INVALID_DATE_RANGE      (417, 422, "dateFrom must not be after dateTo"),
 
+    // ── Date span limit (HTTP 400 Bad Request) ────────────────────
+    DATE_SPAN_TOO_LARGE     (420, 400, "Date span must not exceed 366 days"),
+
     // ── Resource conflicts (HTTP 409 Conflict) ────────────────────
     DUPLICATE_DESTINATION   (418, 409, "A destination for that country and city already exists"),
 

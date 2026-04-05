@@ -5,8 +5,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.time.Instant;
 import java.util.List;
@@ -51,6 +53,26 @@ public class GlobalExceptionHandler {
         List<String> fieldErrors = ex.getBindingResult().getFieldErrors().stream()
                 .map(fe -> fe.getField() + ": " + fe.getDefaultMessage())
                 .toList();
+        return ResponseEntity.badRequest()
+                .body(new ErrorResponse(code.getAppCode(), code.getHttpStatusCode(),
+                        code.getMessage(), fieldErrors, Instant.now()));
+    }
+
+    /** Missing required query/path parameters — maps to {@link AppErrorCode#VALIDATION_FAILED} (400). */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    ResponseEntity<ErrorResponse> handleMissingParam(MissingServletRequestParameterException ex) {
+        AppErrorCode code = AppErrorCode.VALIDATION_FAILED;
+        List<String> fieldErrors = List.of(ex.getParameterName() + ": is required");
+        return ResponseEntity.badRequest()
+                .body(new ErrorResponse(code.getAppCode(), code.getHttpStatusCode(),
+                        code.getMessage(), fieldErrors, Instant.now()));
+    }
+
+    /** Query/path parameter type conversion failures (e.g. bad date format) — maps to {@link AppErrorCode#VALIDATION_FAILED} (400). */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        AppErrorCode code = AppErrorCode.VALIDATION_FAILED;
+        List<String> fieldErrors = List.of(ex.getName() + ": invalid value '" + ex.getValue() + "'");
         return ResponseEntity.badRequest()
                 .body(new ErrorResponse(code.getAppCode(), code.getHttpStatusCode(),
                         code.getMessage(), fieldErrors, Instant.now()));

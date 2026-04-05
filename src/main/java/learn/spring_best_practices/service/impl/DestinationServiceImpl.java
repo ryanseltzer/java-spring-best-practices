@@ -1,8 +1,15 @@
 package learn.spring_best_practices.service.impl;
 
+import learn.spring_best_practices.dto.request.DestinationListRequest;
 import learn.spring_best_practices.dto.request.DestinationRequest;
 import learn.spring_best_practices.dto.request.RemoveDestinationRequest;
+import learn.spring_best_practices.dto.response.DestinationListResponse;
 import learn.spring_best_practices.dto.response.DestinationResponse;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import learn.spring_best_practices.entity.Destination;
 import learn.spring_best_practices.entity.DestinationId;
 import learn.spring_best_practices.exception.AppErrorCode;
@@ -25,11 +32,9 @@ public class DestinationServiceImpl implements DestinationService {
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = "destinations", allEntries = true)
     public DestinationResponse addDestination(DestinationRequest request) {
-        // Validate date range — same-day trips are valid, only reject dateFrom > dateTo
-        if (request.getDateFrom().isAfter(request.getDateTo())) {
-            throw new AppException(AppErrorCode.INVALID_DATE_RANGE);
-        }
+        validateDateRange(request.getDateFrom(), request.getDateTo());
 
         // Validate country and city against ISO 3166-1 data
         locationValidationService.validateLocation(request.getCountryName(), request.getCityName());
@@ -56,6 +61,7 @@ public class DestinationServiceImpl implements DestinationService {
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = "destinations", allEntries = true)
     public DestinationResponse removeDestination(RemoveDestinationRequest request) {
         DestinationId id = new DestinationId(request.countryName(), request.cityName());
         Destination destination = destinationRepository.findById(id)
@@ -75,5 +81,34 @@ public class DestinationServiceImpl implements DestinationService {
                 .dateFrom(request.getDateFrom())
                 .dateTo(request.getDateTo())
                 .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = "destinations", key = "#request.dateFrom + '-' + #request.dateTo")
+    public DestinationListResponse listDestinations(DestinationListRequest request) {
+        validateDateRange(request.getDateFrom(), request.getDateTo());
+
+        if (ChronoUnit.DAYS.between(request.getDateFrom(), request.getDateTo()) > 366) {
+            throw new AppException(AppErrorCode.DATE_SPAN_TOO_LARGE);
+        }
+
+        List<DestinationResponse> results = destinationRepository
+                .findByDateRangeOverlap(request.getDateFrom(), request.getDateTo())
+                .stream()
+                .map(DestinationResponse::from)
+                .toList();
+
+        log.debug("listDestinations returned {} result(s)", results.size());
+        return DestinationListResponse.of(results);
+    }
+
+    // ── Shared validation ─────────────────────────────────────────────────
+
+    /** Same-day trips (dateFrom == dateTo) are valid; only reject dateFrom > dateTo. */
+    private void validateDateRange(LocalDate dateFrom, LocalDate dateTo) {
+        if (dateFrom.isAfter(dateTo)) {
+            throw new AppException(AppErrorCode.INVALID_DATE_RANGE);
+        }
     }
 }
