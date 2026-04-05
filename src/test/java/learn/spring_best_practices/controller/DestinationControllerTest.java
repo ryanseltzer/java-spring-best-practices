@@ -3,12 +3,14 @@ package learn.spring_best_practices.controller;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import learn.spring_best_practices.dto.event.DestinationEvent;
 import learn.spring_best_practices.dto.response.DestinationListResponse;
 import learn.spring_best_practices.dto.response.DestinationResponse;
 import learn.spring_best_practices.exception.AppErrorCode;
 import learn.spring_best_practices.exception.AppException;
 import learn.spring_best_practices.service.DestinationService;
 import org.junit.jupiter.api.BeforeEach;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
@@ -57,6 +59,7 @@ class DestinationControllerTest {
 
     @Autowired WebApplicationContext context;
     @MockitoBean DestinationService destinationService;
+    @MockitoBean KafkaTemplate<String, DestinationEvent> kafkaTemplate;
 
     MockMvc mockMvc;
 

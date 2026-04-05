@@ -3,7 +3,6 @@ package learn.spring_best_practices.aop;
 import learn.spring_best_practices.dto.event.DestinationEvent;
 import learn.spring_best_practices.dto.event.EventType;
 import learn.spring_best_practices.dto.response.DestinationResponse;
-import org.apache.kafka.clients.producer.RecordMetadata;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -123,12 +122,7 @@ class DestinationKafkaAspectTest {
 
     @SuppressWarnings("unchecked")
     private CompletableFuture<SendResult<String, DestinationEvent>> successfulSend() {
-        RecordMetadata metadata = mock(RecordMetadata.class);
-        when(metadata.topic()).thenReturn(TOPIC);
-        when(metadata.partition()).thenReturn(0);
-        when(metadata.offset()).thenReturn(0L);
         SendResult<String, DestinationEvent> sendResult = mock(SendResult.class);
-        when(sendResult.getRecordMetadata()).thenReturn(metadata);
         return CompletableFuture.completedFuture(sendResult);
     }
 }

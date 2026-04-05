@@ -5,7 +5,6 @@ import learn.spring_best_practices.dto.request.DestinationRequest;
 import learn.spring_best_practices.dto.request.RemoveDestinationRequest;
 import learn.spring_best_practices.dto.response.DestinationListResponse;
 import learn.spring_best_practices.dto.response.DestinationResponse;
-import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import org.springframework.cache.annotation.CacheEvict;
@@ -17,6 +16,7 @@ import learn.spring_best_practices.exception.AppException;
 import learn.spring_best_practices.repository.DestinationRepository;
 import learn.spring_best_practices.service.DestinationService;
 import learn.spring_best_practices.service.LocationValidationService;
+import learn.spring_best_practices.service.helpers.DestinationServiceHelper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -34,13 +34,13 @@ public class DestinationServiceImpl implements DestinationService {
     @Transactional
     @CacheEvict(cacheNames = "destinations", allEntries = true)
     public DestinationResponse addDestination(DestinationRequest request) {
-        validateDateRange(request.getDateFrom(), request.getDateTo());
+        DestinationServiceHelper.validateDateRange(request.getDateFrom(), request.getDateTo());
 
         // Validate country and city against ISO 3166-1 data
         locationValidationService.validateLocation(request.getCountryName(), request.getCityName());
 
         // A01: explicit duplicate check before insert — not relying solely on DB constraint
-        DestinationId id = buildId(request);
+        DestinationId id = DestinationServiceHelper.buildId(request);
         if (destinationRepository.existsById(id)) {
             throw new AppException(AppErrorCode.DUPLICATE_DESTINATION);
         }
@@ -84,7 +84,7 @@ public class DestinationServiceImpl implements DestinationService {
     @Transactional(readOnly = true)
     @Cacheable(cacheNames = "destinations", key = "#request.dateFrom + '-' + #request.dateTo")
     public DestinationListResponse listDestinations(DestinationListRequest request) {
-        validateDateRange(request.getDateFrom(), request.getDateTo());
+        DestinationServiceHelper.validateDateRange(request.getDateFrom(), request.getDateTo());
 
         if (ChronoUnit.DAYS.between(request.getDateFrom(), request.getDateTo()) > 366) {
             throw new AppException(AppErrorCode.DATE_SPAN_TOO_LARGE);
@@ -104,11 +104,11 @@ public class DestinationServiceImpl implements DestinationService {
     @Transactional
     @CacheEvict(cacheNames = "destinations", allEntries = true)
     public DestinationResponse updateDestination(DestinationRequest request) {
-        validateDateRange(request.getDateFrom(), request.getDateTo());
+        DestinationServiceHelper.validateDateRange(request.getDateFrom(), request.getDateTo());
 
         locationValidationService.validateLocation(request.getCountryName(), request.getCityName());
 
-        DestinationId id = buildId(request);
+        DestinationId id = DestinationServiceHelper.buildId(request);
         Destination destination = destinationRepository.findById(id)
                 .orElseThrow(() -> new AppException(AppErrorCode.DESTINATION_NOT_FOUND));
 
@@ -123,16 +123,4 @@ public class DestinationServiceImpl implements DestinationService {
         return DestinationResponse.from(saved);
     }
 
-    // ── Shared validation ─────────────────────────────────────────────────
-
-    /** Same-day trips (dateFrom == dateTo) are valid; only reject dateFrom > dateTo. */
-    private void validateDateRange(LocalDate dateFrom, LocalDate dateTo) {
-        if (dateFrom.isAfter(dateTo)) {
-            throw new AppException(AppErrorCode.INVALID_DATE_RANGE);
-        }
-    }
-
-    private DestinationId buildId(DestinationRequest request) {
-        return new DestinationId(request.getCountryName().trim(), request.getCityName().trim());
-    }
 }
