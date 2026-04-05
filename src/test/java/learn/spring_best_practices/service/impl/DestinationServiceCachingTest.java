@@ -5,10 +5,12 @@ import learn.spring_best_practices.dto.request.DestinationRequest;
 import learn.spring_best_practices.dto.request.RemoveDestinationRequest;
 import learn.spring_best_practices.entity.Destination;
 import learn.spring_best_practices.entity.DestinationId;
+import learn.spring_best_practices.dto.event.DestinationEvent;
 import learn.spring_best_practices.repository.DestinationRepository;
 import learn.spring_best_practices.service.DestinationService;
 import learn.spring_best_practices.service.LocationValidationService;
 import org.junit.jupiter.api.BeforeEach;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
@@ -20,6 +22,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -40,13 +43,15 @@ class DestinationServiceCachingTest {
 
     @MockitoBean DestinationRepository destinationRepository;
     @MockitoBean LocationValidationService locationValidationService;
+    @MockitoBean KafkaTemplate<String, DestinationEvent> kafkaTemplate;
 
     private static final LocalDate DATE_FROM = LocalDate.of(2026, 6, 1);
     private static final LocalDate DATE_TO   = LocalDate.of(2026, 12, 1);
 
     @BeforeEach
-    void clearCache() {
+    void setUp() {
         cacheManager.getCache("destinations").clear();
+        when(kafkaTemplate.send(any(), any(), any())).thenReturn(CompletableFuture.completedFuture(null));
     }
 
     // ── @Cacheable — cache hits ───────────────────────────────────────────

@@ -1,10 +1,13 @@
 package learn.spring_best_practices.repository;
 
+import learn.spring_best_practices.dto.event.DestinationEvent;
 import learn.spring_best_practices.entity.Destination;
 import learn.spring_best_practices.entity.DestinationId;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
@@ -21,6 +24,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest
 @Transactional
 class DestinationRepositoryTest {
+
+    @MockitoBean KafkaTemplate<String, DestinationEvent> kafkaTemplate;
 
     @Autowired
     DestinationRepository repository;
