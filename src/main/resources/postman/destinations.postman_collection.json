@@ -1,15 +1,11 @@
 {
   "info": {
     "name": "Spring Best Practices - Destinations API",
-    "description": "Sample requests for the POST /api/destinations endpoint.\n\nThe collection pre-request script auto-generates a fresh signed JWT before every request using the development secret from application.yaml, so tokens never expire mid-session. Switch the base_url variable to target other environments.",
+    "description": "OWASP Top 10 (2021) security test coverage across all four endpoints.\n\nThe collection pre-request script generates a fresh HS256 JWT before every request.\nRequests that need a specific token state (expired, tampered, alg:none) override the\ncollection variable in their own pre-request script or use a hard-coded value.\n\nEndpoints:\n  POST   /api/destinations/add\n  DELETE /api/destinations/{countryName}/{cityName}\n  POST   /api/destinations/verify\n  GET    /api/destinations\n\nOWASP categories covered:\n  A01  Broken Access Control\n  A02  Cryptographic Failures       — alg:none JWT bypass\n  A03  Injection                    — SQL, XSS, path traversal, SSTI\n  A05  Security Misconfiguration    — hardened response headers\n  A07  Identification & Auth        — tampered / expired tokens\n  A08  Software & Data Integrity    — mass assignment via extra JSON fields\n\nRun order matters for state-dependent tests:\n  1. POST /add — Happy path (creates France/Paris and Germany/Berlin)\n  2. POST /verify and GET can run at any point after step 1\n  3. DELETE — Happy path (removes France/Paris)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    {
-      "key": "base_url",
-      "value": "http://localhost:8080",
-      "type": "string"
-    },
+    { "key": "base_url", "value": "http://localhost:8080", "type": "string" },
     {
       "key": "jwt_token",
       "value": "",
@@ -24,25 +20,21 @@
         "type": "text/javascript",
         "exec": [
           "// Generates a fresh HS256 JWT signed with the dev secret from application.yaml.",
-          "// Runs before every request so the 5-minute expiry never causes a mid-session 401.",
-          "",
+          "// Runs before every request — requests testing auth failures override this in their",
+          "// own pre-request script or pass a hard-coded token value directly.",
           "const secretB64 = 'dGhpcy1pcy1hLXZlcnktbG9uZy1zZWNyZXQta2V5LWZvci1qd3Qtc2lnbmluZw==';",
-          "",
           "function base64url(str) {",
           "    return btoa(unescape(encodeURIComponent(str)))",
           "        .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');",
           "}",
-          "",
           "const header  = base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));",
           "const now     = Math.floor(Date.now() / 1000);",
           "const payload = base64url(JSON.stringify({ sub: 'postman-user', iat: now, exp: now + 300 }));",
-          "",
           "const signingInput = header + '.' + payload;",
-          "const key           = CryptoJS.enc.Base64.parse(secretB64);",
-          "const hash          = CryptoJS.HmacSHA256(signingInput, key);",
-          "const signature     = hash.toString(CryptoJS.enc.Base64)",
+          "const key = CryptoJS.enc.Base64.parse(secretB64);",
+          "const hash = CryptoJS.HmacSHA256(signingInput, key);",
+          "const signature = hash.toString(CryptoJS.enc.Base64)",
           "    .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');",
-          "",
           "pm.collectionVariables.set('jwt_token', signingInput + '.' + signature);"
         ]
       }
@@ -50,10 +42,18 @@
   ],
   "item": [
     {
-      "name": "Destinations",
+      "name": "POST /add",
       "item": [
         {
-          "name": "Add destination - valid (201)",
+          "name": "Happy path — valid (201)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));",
+            "pm.test(\"Response has countryName and cityName\", () => {",
+            "    const j = pm.response.json();",
+            "    pm.expect(j).to.have.property(\"countryName\", \"France\");",
+            "    pm.expect(j).to.have.property(\"cityName\", \"Paris\");",
+            "});"
+          ]}}],
           "request": {
             "method": "POST",
             "header": [
@@ -66,15 +66,18 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": {
-              "raw": "{{base_url}}/api/destinations",
+              "raw": "{{base_url}}/api/destinations/add",
               "host": ["{{base_url}}"],
-              "path": ["api", "destinations"]
+              "path": ["api", "destinations", "add"]
             },
             "description": "Happy path. Expects 201 with the saved destination in the response body."
           }
         },
         {
-          "name": "Add destination - same day trip (201)",
+          "name": "Happy path — same-day trip (201)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));"
+          ]}}],
           "request": {
             "method": "POST",
             "header": [
@@ -87,19 +90,55 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": {
-              "raw": "{{base_url}}/api/destinations",
+              "raw": "{{base_url}}/api/destinations/add",
               "host": ["{{base_url}}"],
-              "path": ["api", "destinations"]
+              "path": ["api", "destinations", "add"]
             },
-            "description": "dateFrom and dateTo are the same date. Same-day trips are valid and should return 201."
+            "description": "dateFrom equals dateTo. Same-day trips are valid and should return 201."
           }
         },
         {
-          "name": "Add destination - no token (401)",
+          "name": "A01 | No token (401)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+            "pm.test(\"Has appErrorCode\", () => pm.expect(pm.response.json()).to.have.property(\"appErrorCode\"));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"Italy\",\n  \"cityName\": \"Rome\",\n  \"dateFrom\": \"2025-07-01\",\n  \"dateTo\": \"2025-07-14\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations/add",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "add"]
+            },
+            "description": "A01 Broken Access Control — Authorization header is absent. Unauthenticated requests must be rejected with 401, not redirected to a login page."
+          }
+        },
+        {
+          "name": "A02/A07 | alg:none JWT — algorithm confusion (401)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJhdHRhY2tlciIsImV4cCI6OTk5OTk5OTk5OX0." }
             ],
             "body": {
               "mode": "raw",
@@ -107,15 +146,23 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": {
-              "raw": "{{base_url}}/api/destinations",
+              "raw": "{{base_url}}/api/destinations/add",
               "host": ["{{base_url}}"],
-              "path": ["api", "destinations"]
+              "path": ["api", "destinations", "add"]
             },
-            "description": "Authorization header is intentionally omitted. Expects 401."
+            "description": "A02/A07 — JWT header specifies alg:none with no signature (trailing dot marks the empty signature segment). A vulnerable server that accepts unsigned tokens would allow unauthenticated access. Expects 401."
           }
         },
         {
-          "name": "Add destination - invalid token signature (401)",
+          "name": "A07 | Tampered signature (401)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
           "request": {
             "method": "POST",
             "header": [
@@ -128,15 +175,42 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": {
-              "raw": "{{base_url}}/api/destinations",
+              "raw": "{{base_url}}/api/destinations/add",
               "host": ["{{base_url}}"],
-              "path": ["api", "destinations"]
+              "path": ["api", "destinations", "add"]
             },
-            "description": "Token has a tampered signature. Expects 401."
+            "description": "A07 — Valid header+payload but signature is replaced with garbage. Expects 401."
           }
         },
         {
-          "name": "Add destination - blank country (400)",
+          "name": "A07 | Expired token (401)",
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": [
+              "// Override the collection-level token with one that is already expired (exp = now - 300).",
+              "const secretB64 = 'dGhpcy1pcy1hLXZlcnktbG9uZy1zZWNyZXQta2V5LWZvci1qd3Qtc2lnbmluZw==';",
+              "function base64url(str) {",
+              "    return btoa(unescape(encodeURIComponent(str)))",
+              "        .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');",
+              "}",
+              "const header = base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));",
+              "const now = Math.floor(Date.now() / 1000);",
+              "const payload = base64url(JSON.stringify({ sub: 'postman-user', iat: now - 600, exp: now - 300 }));",
+              "const signingInput = header + '.' + payload;",
+              "const key = CryptoJS.enc.Base64.parse(secretB64);",
+              "const hash = CryptoJS.HmacSHA256(signingInput, key);",
+              "const signature = hash.toString(CryptoJS.enc.Base64)",
+              "    .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');",
+              "pm.collectionVariables.set('jwt_token', signingInput + '.' + signature);"
+            ]}},
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+              "pm.test(\"No Java stack trace\", () => {",
+              "    const t = pm.response.text();",
+              "    pm.expect(t).to.not.include(\".java:\");",
+              "    pm.expect(t).to.not.include(\"at learn.\");",
+              "});"
+            ]}}
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -145,19 +219,58 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"countryName\": \"\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "raw": "{\n  \"countryName\": \"Italy\",\n  \"cityName\": \"Rome\",\n  \"dateFrom\": \"2025-07-01\",\n  \"dateTo\": \"2025-07-14\"\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": {
-              "raw": "{{base_url}}/api/destinations",
+              "raw": "{{base_url}}/api/destinations/add",
               "host": ["{{base_url}}"],
-              "path": ["api", "destinations"]
+              "path": ["api", "destinations", "add"]
             },
-            "description": "countryName is blank. Expects 400 with countryName listed in fieldErrors."
+            "description": "A07 — Correctly signed token using the real dev secret, but exp is 5 minutes in the past. The pre-request script generates the expired token at run time so the signature is always valid. Expects 401."
           }
         },
         {
-          "name": "Add destination - XSS payload in country (400)",
+          "name": "A03 | SQL injection in countryName (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+            "pm.test(\"Has appErrorCode 400\", () => pm.expect(pm.response.json().appErrorCode).to.equal(400));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"France' OR '1'='1\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations/add",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "add"]
+            },
+            "description": "A03 Injection — Classic SQL injection payload. The @Pattern constraint (^[a-zA-Z '-]+$) rejects = and digits before the value reaches any persistence layer. Expects 400."
+          }
+        },
+        {
+          "name": "A03 | XSS payload in countryName (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+            "pm.test(\"Has appErrorCode 400\", () => pm.expect(pm.response.json().appErrorCode).to.equal(400));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
           "request": {
             "method": "POST",
             "header": [
@@ -170,15 +283,138 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": {
-              "raw": "{{base_url}}/api/destinations",
+              "raw": "{{base_url}}/api/destinations/add",
               "host": ["{{base_url}}"],
-              "path": ["api", "destinations"]
+              "path": ["api", "destinations", "add"]
             },
-            "description": "countryName contains a script tag. The @Pattern constraint blocks anything outside [a-zA-Z '-]. Expects 400."
+            "description": "A03 Injection — XSS payload in countryName. The @Pattern constraint rejects < and > before persistence. Expects 400."
           }
         },
         {
-          "name": "Add destination - country name too long (400)",
+          "name": "A03 | Path traversal in cityName (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+            "pm.test(\"Has appErrorCode 400\", () => pm.expect(pm.response.json().appErrorCode).to.equal(400));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"France\",\n  \"cityName\": \"../../etc/passwd\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations/add",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "add"]
+            },
+            "description": "A03 Injection — Path traversal attempt in cityName. The @Pattern constraint rejects . and /. Expects 400."
+          }
+        },
+        {
+          "name": "A03 | SSTI payload in countryName (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+            "pm.test(\"Has appErrorCode 400\", () => pm.expect(pm.response.json().appErrorCode).to.equal(400));",
+            "pm.test(\"Response body does not evaluate SSTI\", () => {",
+            "    pm.expect(pm.response.text()).to.not.include(\"49\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"${7*7}\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations/add",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "add"]
+            },
+            "description": "A03 Injection — SSTI probe: if a template engine evaluated ${7*7} it would return 49. The @Pattern constraint rejects $, {, and } before any evaluation. Expects 400."
+          }
+        },
+        {
+          "name": "A08 | Mass assignment — extra fields ignored (201)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 201\", () => pm.response.to.have.status(201));",
+            "pm.test(\"Injected id not reflected in response\", () => {",
+            "    const j = pm.response.json();",
+            "    pm.expect(j.id).to.not.equal(9999);",
+            "    pm.expect(j.internalFlag).to.be.undefined;",
+            "    pm.expect(j.role).to.be.undefined;",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"Spain\",\n  \"cityName\": \"Madrid\",\n  \"dateFrom\": \"2025-08-01\",\n  \"dateTo\": \"2025-08-10\",\n  \"id\": 9999,\n  \"internalFlag\": true,\n  \"role\": \"ADMIN\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations/add",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "add"]
+            },
+            "description": "A08 Software and Data Integrity Failures — extra undeclared fields (id, internalFlag, role) in the request body. Jackson ignores unknown properties, preventing mass assignment. The response must not echo or apply the injected values. Expects 201."
+          }
+        },
+        {
+          "name": "Validation | blank countryName (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+            "pm.test(\"fieldErrors mentions countryName\", () => {",
+            "    const errors = pm.response.json().fieldErrors;",
+            "    pm.expect(errors.some(e => e.includes(\"countryName\"))).to.be.true;",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations/add",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "add"]
+            },
+            "description": "countryName is blank. Expects 400 with countryName listed in fieldErrors."
+          }
+        },
+        {
+          "name": "Validation | countryName too long (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+            "pm.test(\"fieldErrors mentions countryName\", () => {",
+            "    const errors = pm.response.json().fieldErrors;",
+            "    pm.expect(errors.some(e => e.includes(\"countryName\"))).to.be.true;",
+            "});"
+          ]}}],
           "request": {
             "method": "POST",
             "header": [
@@ -191,15 +427,23 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": {
-              "raw": "{{base_url}}/api/destinations",
+              "raw": "{{base_url}}/api/destinations/add",
               "host": ["{{base_url}}"],
-              "path": ["api", "destinations"]
+              "path": ["api", "destinations", "add"]
             },
             "description": "countryName is 101 characters, one over the @Size(max=100) limit. Expects 400."
           }
         },
         {
-          "name": "Add destination - missing dates (400)",
+          "name": "Validation | missing dates (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+            "pm.test(\"fieldErrors mentions both date fields\", () => {",
+            "    const errors = pm.response.json().fieldErrors.join(' ');",
+            "    pm.expect(errors).to.include(\"dateFrom\");",
+            "    pm.expect(errors).to.include(\"dateTo\");",
+            "});"
+          ]}}],
           "request": {
             "method": "POST",
             "header": [
@@ -212,15 +456,19 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": {
-              "raw": "{{base_url}}/api/destinations",
+              "raw": "{{base_url}}/api/destinations/add",
               "host": ["{{base_url}}"],
-              "path": ["api", "destinations"]
+              "path": ["api", "destinations", "add"]
             },
             "description": "dateFrom and dateTo are absent. Expects 400 with both fields listed in fieldErrors."
           }
         },
         {
-          "name": "Add destination - unrecognised country (422)",
+          "name": "Validation | unrecognised country (422)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 422\", () => pm.response.to.have.status(422));",
+            "pm.test(\"appErrorCode is 415\", () => pm.expect(pm.response.json().appErrorCode).to.equal(415));"
+          ]}}],
           "request": {
             "method": "POST",
             "header": [
@@ -233,15 +481,19 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": {
-              "raw": "{{base_url}}/api/destinations",
+              "raw": "{{base_url}}/api/destinations/add",
               "host": ["{{base_url}}"],
-              "path": ["api", "destinations"]
+              "path": ["api", "destinations", "add"]
             },
-            "description": "Passes Bean Validation (valid characters) but fails ISO 3166-1 lookup. Expects 422 with appErrorCode 415."
+            "description": "Passes Bean Validation but fails ISO 3166-1 lookup in LocationValidationService. Expects 422 with appErrorCode 415."
           }
         },
         {
-          "name": "Add destination - city name too short (422)",
+          "name": "Validation | cityName too short (422)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 422\", () => pm.response.to.have.status(422));",
+            "pm.test(\"appErrorCode is 416\", () => pm.expect(pm.response.json().appErrorCode).to.equal(416));"
+          ]}}],
           "request": {
             "method": "POST",
             "header": [
@@ -254,15 +506,19 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": {
-              "raw": "{{base_url}}/api/destinations",
+              "raw": "{{base_url}}/api/destinations/add",
               "host": ["{{base_url}}"],
-              "path": ["api", "destinations"]
+              "path": ["api", "destinations", "add"]
             },
             "description": "Single-character city passes @Pattern but fails the length >= 2 check in LocationValidationService. Expects 422 with appErrorCode 416."
           }
         },
         {
-          "name": "Add destination - dateFrom after dateTo (422)",
+          "name": "Validation | dateFrom after dateTo (422)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 422\", () => pm.response.to.have.status(422));",
+            "pm.test(\"appErrorCode is 417\", () => pm.expect(pm.response.json().appErrorCode).to.equal(417));"
+          ]}}],
           "request": {
             "method": "POST",
             "header": [
@@ -275,15 +531,44 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": {
-              "raw": "{{base_url}}/api/destinations",
+              "raw": "{{base_url}}/api/destinations/add",
               "host": ["{{base_url}}"],
-              "path": ["api", "destinations"]
+              "path": ["api", "destinations", "add"]
             },
             "description": "dateFrom is later than dateTo. Expects 422 with appErrorCode 417."
           }
         },
         {
-          "name": "Add destination - duplicate (409)",
+          "name": "Validation | date span exceeds 366 days (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+            "pm.test(\"appErrorCode is 420\", () => pm.expect(pm.response.json().appErrorCode).to.equal(420));"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"France\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2024-01-01\",\n  \"dateTo\": \"2025-06-01\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations/add",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "add"]
+            },
+            "description": "Date range spans more than 366 days. Expects 400 with appErrorCode 420."
+          }
+        },
+        {
+          "name": "Validation | duplicate destination (409)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 409\", () => pm.response.to.have.status(409));",
+            "pm.test(\"appErrorCode is 418\", () => pm.expect(pm.response.json().appErrorCode).to.equal(418));"
+          ]}}],
           "request": {
             "method": "POST",
             "header": [
@@ -296,11 +581,588 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": {
-              "raw": "{{base_url}}/api/destinations",
+              "raw": "{{base_url}}/api/destinations/add",
               "host": ["{{base_url}}"],
-              "path": ["api", "destinations"]
+              "path": ["api", "destinations", "add"]
             },
-            "description": "Send this after 'Add destination - valid (201)' to hit the duplicate check. The country/city composite key already exists. Expects 409 with appErrorCode 418."
+            "description": "Run after 'Happy path — valid'. France/Paris already exists. Expects 409 with appErrorCode 418."
+          }
+        }
+      ]
+    },
+    {
+      "name": "DELETE /{countryName}/{cityName}",
+      "item": [
+        {
+          "name": "Happy path — remove existing (200)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+            "pm.test(\"Response has countryName and cityName\", () => {",
+            "    const j = pm.response.json();",
+            "    pm.expect(j).to.have.property(\"countryName\", \"France\");",
+            "    pm.expect(j).to.have.property(\"cityName\", \"Paris\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/destinations/France/Paris",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "France", "Paris"]
+            },
+            "description": "Happy path. Run after 'POST /add — Happy path' to ensure France/Paris exists. Expects 200 with the removed destination."
+          }
+        },
+        {
+          "name": "A01 | No token (401)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+            "pm.test(\"Has appErrorCode\", () => pm.expect(pm.response.json()).to.have.property(\"appErrorCode\"));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/destinations/Italy/Rome",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "Italy", "Rome"]
+            },
+            "description": "A01 Broken Access Control — no Authorization header. Expects 401."
+          }
+        },
+        {
+          "name": "A07 | Tampered signature (401)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdHRhY2tlciJ9.invalidsignature" }],
+            "url": {
+              "raw": "{{base_url}}/api/destinations/Italy/Rome",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "Italy", "Rome"]
+            },
+            "description": "A07 — Tampered JWT signature. Expects 401."
+          }
+        },
+        {
+          "name": "A03 | SQL injection in countryName path variable (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+            "pm.test(\"Has appErrorCode 400\", () => pm.expect(pm.response.json().appErrorCode).to.equal(400));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/destinations/France' OR '1'='1/Paris",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "France' OR '1'='1", "Paris"]
+            },
+            "description": "A03 Injection — SQL injection payload in the countryName path variable. The @Pattern constraint on the @PathVariable rejects =, digits, and other non-alpha chars before the value reaches any persistence layer. Expects 400."
+          }
+        },
+        {
+          "name": "A03 | XSS in countryName path variable (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+            "pm.test(\"Has appErrorCode 400\", () => pm.expect(pm.response.json().appErrorCode).to.equal(400));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/destinations/%3Cscript%3Ealert(1)%3C%2Fscript%3E/Paris",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "%3Cscript%3Ealert(1)%3C%2Fscript%3E", "Paris"]
+            },
+            "description": "A03 Injection — URL-encoded XSS payload in countryName path variable. After URL-decoding the @Pattern constraint rejects < and >. Expects 400."
+          }
+        },
+        {
+          "name": "A03 | Path traversal in cityName (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is not 200\", () => pm.expect(pm.response.code).to.not.equal(200));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/destinations/France/..%2F..%2Fetc",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "France", "..%2F..%2Fetc"]
+            },
+            "description": "A03 Injection — Path traversal probe using URL-encoded slashes in cityName. The container rejects encoded path separators; if decoded, @Pattern rejects . and /. Must not return 200."
+          }
+        },
+        {
+          "name": "Validation | destination not found (404)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 404\", () => pm.response.to.have.status(404));",
+            "pm.test(\"appErrorCode is 419\", () => pm.expect(pm.response.json().appErrorCode).to.equal(419));"
+          ]}}],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/destinations/Nowhere/Nothing",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "Nowhere", "Nothing"]
+            },
+            "description": "Country and city combination does not exist. Expects 404 with appErrorCode 419."
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST /verify",
+      "item": [
+        {
+          "name": "Happy path — destination exists (200)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+            "pm.test(\"Response has countryName and cityName\", () => {",
+            "    const j = pm.response.json();",
+            "    pm.expect(j).to.have.property(\"countryName\");",
+            "    pm.expect(j).to.have.property(\"cityName\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"France\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations/verify",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "verify"]
+            },
+            "description": "Happy path. Run after 'POST /add — Happy path'. Expects 200."
+          }
+        },
+        {
+          "name": "A01 | No token (401)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+            "pm.test(\"Has appErrorCode\", () => pm.expect(pm.response.json()).to.have.property(\"appErrorCode\"));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"France\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations/verify",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "verify"]
+            },
+            "description": "A01 — No Authorization header. Expects 401."
+          }
+        },
+        {
+          "name": "A07 | Tampered signature (401)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdHRhY2tlciJ9.invalidsignature" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"France\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations/verify",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "verify"]
+            },
+            "description": "A07 — Tampered JWT signature. Expects 401."
+          }
+        },
+        {
+          "name": "A03 | SQL injection in countryName (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+            "pm.test(\"Has appErrorCode 400\", () => pm.expect(pm.response.json().appErrorCode).to.equal(400));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"France' OR '1'='1\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations/verify",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "verify"]
+            },
+            "description": "A03 — SQL injection payload. @Pattern rejects = and digits. Expects 400."
+          }
+        },
+        {
+          "name": "A03 | XSS payload in countryName (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+            "pm.test(\"Has appErrorCode 400\", () => pm.expect(pm.response.json().appErrorCode).to.equal(400));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"<img src=x onerror=alert(1)>\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations/verify",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "verify"]
+            },
+            "description": "A03 — Attribute-injection XSS probe. @Pattern rejects < and >. Expects 400."
+          }
+        },
+        {
+          "name": "A08 | Mass assignment — extra fields ignored (200)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+            "pm.test(\"Injected fields not in response\", () => {",
+            "    const j = pm.response.json();",
+            "    pm.expect(j.role).to.be.undefined;",
+            "    pm.expect(j.internalFlag).to.be.undefined;",
+            "});"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countryName\": \"France\",\n  \"cityName\": \"Paris\",\n  \"dateFrom\": \"2025-06-01\",\n  \"dateTo\": \"2025-06-10\",\n  \"role\": \"ADMIN\",\n  \"internalFlag\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/destinations/verify",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations", "verify"]
+            },
+            "description": "A08 — Extra undeclared fields (role, internalFlag) in request body. Jackson ignores them; they must not appear in the response or affect server-side state."
+          }
+        }
+      ]
+    },
+    {
+      "name": "GET /api/destinations",
+      "item": [
+        {
+          "name": "Happy path — list in date range (200)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+            "pm.test(\"Response has destinations array\", () => {",
+            "    pm.expect(pm.response.json()).to.have.property(\"destinations\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/destinations?dateFrom=2025-01-01&dateTo=2025-12-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"],
+              "query": [
+                { "key": "dateFrom", "value": "2025-01-01" },
+                { "key": "dateTo", "value": "2025-12-31" }
+              ]
+            },
+            "description": "Happy path. Returns all destinations whose date range overlaps with the query window."
+          }
+        },
+        {
+          "name": "A01 | No token (401)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+            "pm.test(\"Has appErrorCode\", () => pm.expect(pm.response.json()).to.have.property(\"appErrorCode\"));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/destinations?dateFrom=2025-01-01&dateTo=2025-12-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"],
+              "query": [
+                { "key": "dateFrom", "value": "2025-01-01" },
+                { "key": "dateTo", "value": "2025-12-31" }
+              ]
+            },
+            "description": "A01 — No Authorization header. Expects 401."
+          }
+        },
+        {
+          "name": "A07 | Tampered signature (401)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdHRhY2tlciJ9.invalidsignature" }],
+            "url": {
+              "raw": "{{base_url}}/api/destinations?dateFrom=2025-01-01&dateTo=2025-12-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"],
+              "query": [
+                { "key": "dateFrom", "value": "2025-01-01" },
+                { "key": "dateTo", "value": "2025-12-31" }
+              ]
+            },
+            "description": "A07 — Tampered JWT signature. Expects 401."
+          }
+        },
+        {
+          "name": "A03 | SQL injection in dateFrom param (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+            "pm.test(\"Has appErrorCode 400\", () => pm.expect(pm.response.json().appErrorCode).to.equal(400));",
+            "pm.test(\"No Java stack trace\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/destinations?dateFrom=2025-01-01' OR '1'='1&dateTo=2025-12-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"],
+              "query": [
+                { "key": "dateFrom", "value": "2025-01-01' OR '1'='1" },
+                { "key": "dateTo", "value": "2025-12-31" }
+              ]
+            },
+            "description": "A03 Injection — SQL injection payload in the dateFrom query parameter. LocalDate parsing fails immediately (MethodArgumentTypeMismatchException → 400). The payload never reaches the repository layer."
+          }
+        },
+        {
+          "name": "Validation | dateFrom after dateTo (422)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 422\", () => pm.response.to.have.status(422));",
+            "pm.test(\"appErrorCode is 417\", () => pm.expect(pm.response.json().appErrorCode).to.equal(417));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/destinations?dateFrom=2025-12-31&dateTo=2025-01-01",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"],
+              "query": [
+                { "key": "dateFrom", "value": "2025-12-31" },
+                { "key": "dateTo", "value": "2025-01-01" }
+              ]
+            },
+            "description": "dateFrom is later than dateTo. Expects 422 with appErrorCode 417."
+          }
+        },
+        {
+          "name": "Validation | date span exceeds 366 days (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+            "pm.test(\"appErrorCode is 420\", () => pm.expect(pm.response.json().appErrorCode).to.equal(420));"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/destinations?dateFrom=2024-01-01&dateTo=2025-06-01",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"],
+              "query": [
+                { "key": "dateFrom", "value": "2024-01-01" },
+                { "key": "dateTo", "value": "2025-06-01" }
+              ]
+            },
+            "description": "Date span is more than 366 days. Expects 400 with appErrorCode 420."
+          }
+        },
+        {
+          "name": "Validation | missing dateFrom param (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 400\", () => pm.response.to.have.status(400));",
+            "pm.test(\"fieldErrors mentions dateFrom\", () => {",
+            "    const errors = pm.response.json().fieldErrors;",
+            "    pm.expect(errors.some(e => e.includes(\"dateFrom\"))).to.be.true;",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/destinations?dateTo=2025-12-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"],
+              "query": [
+                { "key": "dateTo", "value": "2025-12-31" }
+              ]
+            },
+            "description": "Required dateFrom query parameter is absent. MissingServletRequestParameterException → 400 with fieldErrors listing dateFrom."
+          }
+        }
+      ]
+    },
+    {
+      "name": "OWASP A05 — Security Headers",
+      "item": [
+        {
+          "name": "A05 | Hardened response headers on authenticated request",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"X-Content-Type-Options: nosniff — prevents MIME sniffing (A05)\", () => {",
+            "    pm.expect(pm.response.headers.get(\"X-Content-Type-Options\")).to.equal(\"nosniff\");",
+            "});",
+            "pm.test(\"Strict-Transport-Security present and includes subdomains (A02/A05)\", () => {",
+            "    const hsts = pm.response.headers.get(\"Strict-Transport-Security\");",
+            "    pm.expect(hsts).to.not.be.null;",
+            "    pm.expect(hsts).to.include(\"max-age\");",
+            "    pm.expect(hsts).to.include(\"includeSubDomains\");",
+            "});",
+            "pm.test(\"X-Frame-Options: DENY — prevents clickjacking (A05)\", () => {",
+            "    pm.expect(pm.response.headers.get(\"X-Frame-Options\")).to.equal(\"DENY\");",
+            "});",
+            "pm.test(\"Cache-Control prevents caching of sensitive data (A05)\", () => {",
+            "    const cc = pm.response.headers.get(\"Cache-Control\");",
+            "    pm.expect(cc).to.not.be.null;",
+            "    pm.expect(cc).to.include(\"no-store\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/destinations?dateFrom=2025-01-01&dateTo=2025-12-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"],
+              "query": [
+                { "key": "dateFrom", "value": "2025-01-01" },
+                { "key": "dateTo", "value": "2025-12-31" }
+              ]
+            },
+            "description": "A05 Security Misconfiguration — verifies Spring Security's hardened header set is present on every response:\n  X-Content-Type-Options: nosniff   — prevents MIME-type sniffing\n  Strict-Transport-Security          — enforces HTTPS for future requests\n  X-Frame-Options: DENY              — prevents clickjacking\n  Cache-Control: no-store            — prevents caching of sensitive API responses"
+          }
+        },
+        {
+          "name": "A05/A09 | 401 response exposes no server fingerprint",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test(\"Status is 401\", () => pm.response.to.have.status(401));",
+            "pm.test(\"No X-Powered-By header (A05)\", () => {",
+            "    pm.expect(pm.response.headers.get(\"X-Powered-By\")).to.be.null;",
+            "});",
+            "pm.test(\"Server header does not reveal version (A05)\", () => {",
+            "    const server = pm.response.headers.get(\"Server\");",
+            "    if (server) {",
+            "        pm.expect(server.toLowerCase()).to.not.include(\"tomcat\");",
+            "        pm.expect(server.toLowerCase()).to.not.include(\"apache\");",
+            "    }",
+            "});",
+            "pm.test(\"No Java stack trace in error body (A09)\", () => {",
+            "    const t = pm.response.text();",
+            "    pm.expect(t).to.not.include(\".java:\");",
+            "    pm.expect(t).to.not.include(\"at learn.\");",
+            "    pm.expect(t).to.not.include(\"NullPointerException\");",
+            "});"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/destinations?dateFrom=2025-01-01&dateTo=2025-12-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "destinations"],
+              "query": [
+                { "key": "dateFrom", "value": "2025-01-01" },
+                { "key": "dateTo", "value": "2025-12-31" }
+              ]
+            },
+            "description": "A05/A09 — Even error responses must not leak server version (X-Powered-By, verbose Server header) or internal detail (stack traces, exception class names). Fires an unauthenticated request to trigger a 401 and inspects the response headers and body."
           }
         }
       ]

@@ -16,4 +16,6 @@ public interface DestinationService {
     DestinationResponse verifyDestination(DestinationRequest request);
 
     DestinationListResponse listDestinations(DestinationListRequest request);
+
+    DestinationResponse updateDestination(DestinationRequest request);
 }

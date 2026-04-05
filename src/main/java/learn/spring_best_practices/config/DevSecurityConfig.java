@@ -21,6 +21,7 @@ public class DevSecurityConfig {
 
     @Bean
     @Order(1)
+    @SuppressWarnings("java:S4502") // Disabling CSRF is acceptable for the H2 console and health endpoints in dev
     SecurityFilterChain devFilterChain(HttpSecurity http) {
         http
                 .securityMatcher("/h2-console/**", "/actuator/health/**")
